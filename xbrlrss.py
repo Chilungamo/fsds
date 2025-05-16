@@ -14,7 +14,7 @@ xbrlfeed = feedparser.parse(response.content)
 
 if xbrlfeed.entries:
     for i, entry in enumerate(xbrlfeed.entries[:5]):
-        #print(f"\nEntry {i} keys: {entry.keys()}")
+        print(f"\nEntry {i} keys: {entry.keys()}")
         print(f"Company Name: {entry.get('edgar_companyname')}")
         print(f"Form Type: {entry.get('edgar_formtype')}")
         print(f"Filing Date: {entry.get('edgar_filingdate')}")
