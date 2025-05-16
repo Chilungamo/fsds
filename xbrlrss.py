@@ -62,7 +62,7 @@ cur.execute("""
 for e in entries:
     try:
         # Convert date strings to proper formats
-        filing_date = datetime.strptime(e["filing_date"], "%Y-%m-%d").date() if e["filing_date"] else None
+        filing_date = datetime.strptime(e["filing_date"], "%m/%d/%Y").date() if e["filing_date"] else None
         pub_date = datetime.strptime(e["pub_date"], "%a, %d %b %Y %H:%M:%S %Z") if e["pub_date"] else None
 
         cur.execute("""
