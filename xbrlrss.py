@@ -36,9 +36,9 @@ for entry in xbrlfeed.entries:
 # === 3. Connect to PostgreSQL ===
 conn = psycopg2.connect(
     host="localhost",
-    dbname="your_db_name",
-    user="your_username",
-    password="your_password",
+    dbname="fsds",
+    user="postgres",
+    password="locale",
     port="5432"
 )
 cur = conn.cursor()
