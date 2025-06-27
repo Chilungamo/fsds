@@ -12,6 +12,7 @@ headers = {"User-Agent": "limanialbert@gmail.com"}
 response = requests.get(url, headers=headers)
 xbrlfeed = feedparser.parse(response.content)
 
+
 if xbrlfeed.entries:
     for i, entry in enumerate(xbrlfeed.entries[:5]):
         print(f"\nEntry {i} keys: {entry.keys()}")
@@ -19,6 +20,8 @@ if xbrlfeed.entries:
         print(f"Form Type: {entry.get('edgar_formtype')}")
         print(f"Filing Date: {entry.get('edgar_filingdate')}")
         print(f"CIK: {entry.get('edgar_ciknumber')}")
+        print(f"xBRL file: {entry.get('edgar_xbrlfile')}")
+        print(f"summary_detail: {entry.get('summary_details')}")
 
 # === 2. Convert entries to a list of dictionaries ===
 entries = []
@@ -41,6 +44,7 @@ conn = psycopg2.connect(
     password="locale",
     port="5432"
 )
+
 cur = conn.cursor()
 
 # === 4. Create table if it doesn't exist ===
