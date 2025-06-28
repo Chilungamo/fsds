@@ -3,11 +3,12 @@ import time
 import logging
 import requests
 import pandas as pd
-from sqlalchemy import create_engine
+from datetime import datetime
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine.url import URL
 from dotenv import load_dotenv
 
-# --- Load environment variables from .env file if available ---
+# --- Load environment variables ---
 load_dotenv()
 
 # --- Logging setup ---
@@ -30,10 +31,30 @@ except Exception as e:
     logging.error(f"❌ Failed to load ticker list: {e}")
     exit(1)
 
+# --- DB connection ---
+db_url = URL.create(
+    drivername="postgresql+psycopg2",
+    username=os.getenv("DB_USER", "postgres"),
+    password=os.getenv("DB_PASS", "locale"),
+    host=os.getenv("DB_HOST", "localhost"),
+    port=os.getenv("DB_PORT", "5432"),
+    database=os.getenv("DB_NAME", "fsds")
+)
+engine = create_engine(db_url)
+
+# --- Get already existing keys to avoid duplication ---
+existing_keys = set()
+try:
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT cik, accession, start, end FROM revenues2"))
+        existing_keys = set((str(r[0]), str(r[1]), str(r[2])) for r in result.fetchall())
+    logging.info(f"📌 Found {len(existing_keys)} existing entries to skip.")
+except Exception:
+    logging.warning("⚠️ Table not found or first run. All data will be collected.")
+
 # --- Results Collection ---
 results = []
 
-# Optional: limit number of companies for testing (e.g., .head(50))
 for _, row in companies.iterrows():
     cik = row["cik"]
     name = row["title"]
@@ -42,24 +63,33 @@ for _, row in companies.iterrows():
     try:
         resp = requests.get(url, headers=HEADERS, timeout=10)
         if resp.status_code == 200:
-            data = resp.json().get("units", {}).get("USD", [])
-            for e in data:
-                results.append({
-                    "company": name,
-                    "cik": cik,
-                    "accession": e.get("accn"),
-                    "form": e.get("form"),
-                    "fy": e.get("fy"),
-                    "fp": e.get("fp"),
-                    "start": e.get("start"),
-                    "end": e.get("end"),
-                    "value": e.get("val"),
-                    "filed": e.get("filed"),
-                    "frame": e.get("frame")
-                })
+            entries = resp.json().get("units", {}).get("USD", [])
+            for e in entries:
+                accn = e.get("accn")
+                start = e.get("end")
+                end =e.get("end")
+                key = (cik, accn, start,end)
+                if key in existing_keys:
+                    continue  # Skip duplicate
+                try:
+                    results.append({
+                        "company": name,
+                        "cik": cik,
+                        "accession": accn,
+                        "form": e.get("form"),
+                        "fy": e.get("fy"),
+                        "fp": e.get("fp"),
+                        "start": pd.to_datetime(start, errors='coerce').date() if start else None,
+                        "end": pd.to_datetime(end, errors='coerce').date() if end else None,
+                        "frame": e.get("frame"),
+                        "value": e.get("val"),
+                        "filed": pd.to_datetime(e.get("filed"), errors='coerce').date() if e.get("filed") else None
+                    })
+                except Exception as err:
+                    logging.warning(f"⚠️ Skipped malformed record for {cik}: {err}")
         else:
             logging.warning(f"⚠️ No data or bad response for {name} ({cik}) - {resp.status_code}")
-        time.sleep(0.2)  # Respect SEC rate limits
+        time.sleep(0.2)
     except Exception as e:
         logging.warning(f"❌ Error fetching data for {cik}: {e}")
         continue
@@ -67,28 +97,12 @@ for _, row in companies.iterrows():
 # --- Save to PostgreSQL ---
 if results:
     df = pd.DataFrame(results)
-    logging.info(f"✅ Collected {len(df)} records.")
-    logging.info(f"\n📊 Sample Data:\n{df.head()}")
+    logging.info(f"✅ Collected {len(df)} new records.")
 
-    # Database connection via environment variables
-    db_url = URL.create(
-        drivername="postgresql+psycopg2",
-        username=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASS", "locale"),
-        host=os.getenv("DB_HOST", "localhost"),
-        port=os.getenv("DB_PORT", "5432"),
-        database=os.getenv("DB_NAME", "fsds")
-    )
-    
     try:
-        engine = create_engine(db_url)
-        df.to_sql("revenues", engine, if_exists="replace", index=False)
-        logging.info("✅ Data saved to PostgreSQL table `revenues`")
-        
-        # Optional: validate
-        row_count = pd.read_sql("SELECT COUNT(*) FROM revenues", engine).iloc[0, 0]
-        logging.info(f"📦 Total rows in DB table: {row_count}")
+        df.to_sql("revenues2", engine, if_exists="append", index=False)
+        logging.info("✅ Data appended to PostgreSQL table `revenues2`")
     except Exception as e:
         logging.error(f"❌ Failed to save to database: {e}")
 else:
-    logging.warning("⚠️ No data collected. Nothing saved.")
+    logging.info("⚠️ No new data to insert.")
