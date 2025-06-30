@@ -82,11 +82,11 @@ if results:
     
     try:
         engine = create_engine(db_url)
-        df.to_sql("opscash", engine, if_exists="replace", index=False)
-        logging.info("✅ Data saved to PostgreSQL table `opscash`")
+        df.to_sql("opscash2", engine, if_exists="replace", index=False)
+        logging.info("✅ Data saved to PostgreSQL table `opscash2`")
         
         # Optional: validate
-        row_count = pd.read_sql("SELECT COUNT(*) FROM opscash", engine).iloc[0, 0]
+        row_count = pd.read_sql("SELECT COUNT(*) FROM opscash2", engine).iloc[0, 0]
         logging.info(f"📦 Total rows in DB table: {row_count}")
     except Exception as e:
         logging.error(f"❌ Failed to save to database: {e}")
