@@ -46,7 +46,7 @@ engine = create_engine(db_url)
 existing_keys = set()
 try:
     with engine.connect() as conn:
-        result = conn.execute(text("SELECT cik, accession, ddate FROM receivables2"))
+        result = conn.execute(text("SELECT cik, accession, ddate FROM receivables"))
         existing_keys = set((str(r[0]), str(r[1]), str(r[2])) for r in result.fetchall())
     logging.info(f"📌 Found {len(existing_keys)} existing entries to skip.")
 except Exception:
@@ -97,8 +97,8 @@ if results:
     logging.info(f"✅ Collected {len(df)} new records.")
 
     try:
-        df.to_sql("receivables2", engine, if_exists="append", index=False)
-        logging.info("✅ Data appended to PostgreSQL table `receivables2`")
+        df.to_sql("receivables", engine, if_exists="append", index=False)
+        logging.info("✅ Data appended to PostgreSQL table `receivables`")
     except Exception as e:
         logging.error(f"❌ Failed to save to database: {e}")
 else:
