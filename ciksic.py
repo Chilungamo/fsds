@@ -2,6 +2,7 @@ import requests
 import time
 import pandas as pd
 from sqlalchemy import create_engine
+from tqdm import tqdm
 
 # DB connection
 engine = create_engine("postgresql+psycopg2://postgres:locale@localhost:5432/fsds")
@@ -11,7 +12,7 @@ headers = {"User-Agent": "albertlimani@yahoo.com"}
 # Get company tickers
 tickers = requests.get("https://www.sec.gov/files/company_tickers.json", headers=headers).json()
 df = pd.DataFrame.from_dict(tickers, orient='index')
-df['cik'] = df['cik_str'].astype(str).str.zfill(10)
+df['cik'] = df['cik_str'].astype(str).str.zfill(10) #Access cik_str in df and convert it to a string with leading 0s to make it 10 characters long
 
 # Load existing CIKs from DB
 try:
@@ -23,7 +24,7 @@ except Exception:
 # Prepare output
 rows = []
 
-for _, row in df.iterrows():
+for _, row in tqdm(df.iterrows(), total=len(df), desc="fetching sec sic codes"):
     cik = row['cik']
     if cik in existing_ciks:
         continue  # skip duplicates
