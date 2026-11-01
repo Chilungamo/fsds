@@ -1,3 +1,4 @@
+from fsds.config import sec_headers
 
 import requests
 import pandas as pd
@@ -6,7 +7,7 @@ import pandas as pd
 def get_accessions(cik):
     cik = str(cik).zfill(10)
     r = requests.get(f"https://data.sec.gov/submissions/CIK{cik}.json",
-                     headers={"User-Agent": "albertlimani@yahoo.com"})
+                     headers=sec_headers())
     r.raise_for_status()
     df = pd.DataFrame(r.json()["filings"]["recent"])
     return df[df.form.eq("10-K")][["accessionNumber", "filingDate"]].sort_values("filingDate", ascending=False)

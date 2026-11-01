@@ -4,18 +4,14 @@ import logging
 import requests
 import pandas as pd
 from datetime import datetime
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine.url import URL
-from dotenv import load_dotenv
-
-# --- Load environment variables ---
-load_dotenv()
+from sqlalchemy import text
+from fsds.config import sec_headers, get_engine
 
 # --- Logging setup ---
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 # --- Configuration ---
-HEADERS = {"User-Agent": "albertlimani@yahoo.com"}
+HEADERS = sec_headers()
 CONCEPT_TAG = "NetIncomeLoss"
 ENDPOINT_TEMPLATE = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{concept}.json"
 
@@ -31,23 +27,24 @@ except Exception as e:
     logging.error(f"❌ Failed to load ticker list: {e}")
     exit(1)
 
+
+def _date_key(d):
+    """Normalise a date / ISO string / None so DB rows and API rows compare equal."""
+    return None if d is None else str(d)[:10]
+
+
 # --- DB connection ---
-db_url = URL.create(
-    drivername="postgresql+psycopg2",
-    username=os.getenv("DB_USER", "postgres"),
-    password=os.getenv("DB_PASS", "locale"),
-    host=os.getenv("DB_HOST", "localhost"),
-    port=os.getenv("DB_PORT", "5432"),
-    database=os.getenv("DB_NAME", "fsds")
-)
-engine = create_engine(db_url)
+engine = get_engine()
 
 # --- Get already existing keys to avoid duplication ---
 existing_keys = set()
 try:
     with engine.connect() as conn:
-        result = conn.execute(text("SELECT cik, accession, start, end FROM revenues2"))
-        existing_keys = set((str(r[0]), str(r[1]), str(r[2])) for r in result.fetchall())
+        # "end" is a reserved word in PostgreSQL and must be quoted.
+        result = conn.execute(text('SELECT cik, accession, start, "end" FROM income2'))
+        existing_keys = set(
+            (str(r[0]), str(r[1]), _date_key(r[2]), _date_key(r[3])) for r in result.fetchall()
+        )
     logging.info(f"📌 Found {len(existing_keys)} existing entries to skip.")
 except Exception:
     logging.warning("⚠️ Table not found or first run. All data will be collected.")
@@ -66,9 +63,9 @@ for _, row in companies.iterrows():
             entries = resp.json().get("units", {}).get("USD", [])
             for e in entries:
                 accn = e.get("accn")
-                start = e.get("end")
-                end =e.get("end")
-                key = (cik, accn, start,end)
+                start = e.get("start")
+                end = e.get("end")
+                key = (cik, accn, _date_key(start), _date_key(end))
                 if key in existing_keys:
                     continue  # Skip duplicate
                 try:

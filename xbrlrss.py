@@ -1,6 +1,7 @@
 import requests
 import feedparser
 import psycopg2
+from fsds.config import sec_headers, db_url
 from datetime import datetime
 
 # print("Bozo:", feed.bozo)
@@ -8,7 +9,7 @@ from datetime import datetime
 
 # === 1. Fetch and parse the SEC XBRL RSS feed ===
 url = "https://www.sec.gov/Archives/edgar/xbrlrss.all.xml"
-headers = {"User-Agent": "limanialbert@gmail.com"}
+headers = sec_headers()
 response = requests.get(url, headers=headers)
 xbrlfeed = feedparser.parse(response.content)
 
@@ -37,12 +38,13 @@ for entry in xbrlfeed.entries:
     })
 
 # === 3. Connect to PostgreSQL ===
+_url = db_url()
 conn = psycopg2.connect(
-    host="localhost",
-    dbname="fsds",
-    user="postgres",
-    password="locale",
-    port="5432"
+    host=_url.host,
+    dbname=_url.database,
+    user=_url.username,
+    password=_url.password,
+    port=_url.port,
 )
 
 cur = conn.cursor()

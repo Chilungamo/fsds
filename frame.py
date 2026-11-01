@@ -1,3 +1,4 @@
+from fsds.config import sec_headers
 import requests
 import feedparser
 # import psycopg2
@@ -7,7 +8,7 @@ from datetime import datetime
 #print("Feed has", len(feed.entries), "entries") # checks number of feed entries
 
 
-headers = {"User-Agent": "limanialbert@gmail.com"}
+headers = sec_headers()
 
 # List of concepts to check
 concepts = [

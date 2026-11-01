@@ -3,18 +3,13 @@ import time
 import logging
 import requests
 import pandas as pd
-from sqlalchemy import create_engine
-from sqlalchemy.engine.url import URL
-from dotenv import load_dotenv
-
-# --- Load environment variables from .env file if available ---
-load_dotenv()
+from fsds.config import sec_headers, get_engine
 
 # --- Logging setup ---
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 # --- Configuration ---
-HEADERS = {"User-Agent": "albertlimani@yahoo.com"}
+HEADERS = sec_headers()
 CONCEPT_TAG = "NetCashProvidedByUsedInOperatingActivities"
 ENDPOINT_TEMPLATE = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{concept}.json"
 
@@ -71,17 +66,9 @@ if results:
     logging.info(f"\n📊 Sample Data:\n{df.head()}")
 
     # Database connection via environment variables
-    db_url = URL.create(
-        drivername="postgresql+psycopg2",
-        username=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASS", "locale"),
-        host=os.getenv("DB_HOST", "localhost"),
-        port=os.getenv("DB_PORT", "5432"),
-        database=os.getenv("DB_NAME", "fsds")
-    )
     
     try:
-        engine = create_engine(db_url)
+        engine = get_engine()
         df.to_sql("opscash2", engine, if_exists="replace", index=False)
         logging.info("✅ Data saved to PostgreSQL table `opscash2`")
         

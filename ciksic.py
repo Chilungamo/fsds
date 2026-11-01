@@ -3,13 +3,13 @@
 import requests
 import time
 import pandas as pd
-from sqlalchemy import create_engine
+from fsds.config import sec_headers, get_engine
 from tqdm import tqdm
 
 # DB connection
-engine = create_engine("postgresql+psycopg2://postgres:locale@localhost:5432/fsds")
+engine = get_engine()
 
-headers = {"User-Agent": "albertlimani@yahoo.com"}
+headers = sec_headers()
 
 # Get company tickers
 tickers = requests.get("https://www.sec.gov/files/company_tickers.json", headers=headers).json()

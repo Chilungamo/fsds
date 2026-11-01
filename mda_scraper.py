@@ -1,3 +1,4 @@
+from fsds.config import sec_headers
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -6,7 +7,7 @@ import re
 filing_url = "https://www.sec.gov/Archives/edgar/data/320193/000032019323000092/aapl-20230930.htm"  # Example: Apple 10-K
 
 # STEP 2: Request the HTML content
-headers = {"User-Agent": "your-email@example.com"}
+headers = sec_headers()
 response = requests.get(filing_url, headers=headers)
 
 if response.status_code != 200:
