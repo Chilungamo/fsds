@@ -8,3 +8,4 @@ tqdm>=4.66
 feedparser>=6.0
 beautifulsoup4>=4.12
 pytest>=8.0
+tabulate>=0.9
