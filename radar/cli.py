@@ -230,13 +230,15 @@ def cmd_enrich(args: argparse.Namespace) -> int:
                WHERE rc.status IN ('CONFIRMED', 'NEEDS_REVIEW')
                  AND (%s::bigint IS NULL OR rc.id = %s)
                  AND (%s OR f.meta->'deltas'->>'version' IS DISTINCT FROM %s)
+                 AND (NOT %s OR f.meta->'deltas'->>'source' IS NULL)
                  AND abs(hashtext(f.accession)) %% %s = %s
                ORDER BY f.filed_date DESC LIMIT %s""",
             (
                 args.case,
                 args.case,
-                args.force,
+                args.force or args.missing,
                 ENRICH_VERSION,
+                args.missing,
                 args.shards,
                 args.shard,
                 args.limit or 10**9,
@@ -412,6 +414,7 @@ def main(argv: list[str] | None = None) -> int:
     en.add_argument("--case", type=int)
     en.add_argument("--limit", type=int)
     en.add_argument("--force", action="store_true", help="recompute even if up to date")
+    en.add_argument("--missing", action="store_true", help="only amendments without deltas")
     en.add_argument("--shard", type=int, default=0, help="this worker's shard (0-based)")
     en.add_argument("--shards", type=int, default=1, help="number of parallel workers")
     en.set_defaults(func=cmd_enrich)

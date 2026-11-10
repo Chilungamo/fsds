@@ -209,3 +209,24 @@ def test_minus_months_handles_month_ends():
     assert _minus_months(date(2019, 9, 30), 9) == date(2018, 12, 31)
     assert _minus_months(date(2024, 2, 29), 12) == date(2023, 2, 28)
     assert _minus_months(date(2025, 9, 27), 3) == date(2025, 6, 27)
+
+
+def test_difference_column_last():
+    """Altimeter Growth (2021): As Reported | As Restated | Difference."""
+    html = b"""<html><body><table>
+      <tr><td></td><td colspan="2">As of December 31, 2020</td><td colspan="2">As of December 31, 2020</td><td colspan="2">As of December 31, 2020</td></tr>
+      <tr><td></td><td colspan="2">As Reported</td><td colspan="2">As Restated</td><td colspan="2">Difference</td></tr>
+      <tr><td>Balance Sheet</td></tr>
+      <tr><td>Total Liabilities</td><td></td><td>17,564,100</td><td>$</td><td>174,754,111</td><td>$</td><td>157,190,011</td></tr>
+    </table></body></html>"""
+    (r,) = extract_html(html)
+    assert (r.previously_reported, r.adjustment, r.restated) == (
+        17_564_100,
+        157_190_011,
+        174_754_111,
+    )
+    assert r.period_end == "2020-12-31" and r.check_ok
+
+
+def test_band_with_two_numbers_is_ambiguous():
+    assert parse_number("17,475,411 1,139,625,911") is None

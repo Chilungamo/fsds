@@ -312,3 +312,140 @@ concepts = [
   "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseExcludingExchangeRateEffect",
 ]
 labels = ["net (increase|decrease|change|increase \\(decrease\\)|\\(decrease\\) increase|decrease \\(increase\\)) in cash.*"]
+
+# --- added after the M2 enrichment run (most frequent unmapped concepts) ---------------
+
+[rd]
+statement = "IS"
+name = "Research & development"
+concepts = ["ResearchAndDevelopmentExpense", "ResearchAndDevelopmentExpenseExcludingAcquiredInProcessCost"]
+labels = ["research and development( expenses?)?"]
+
+[interest_expense]
+statement = "IS"
+name = "Interest expense"
+concepts = ["InterestExpense", "InterestExpenseNonoperating", "InterestExpenseDebt"]
+labels = ["interest expense(, net)?"]
+
+[other_income]
+statement = "IS"
+name = "Other income (expense)"
+concepts = ["NonoperatingIncomeExpense", "OtherNonoperatingIncomeExpense"]
+labels = ["(total )?other (income|expense|income \\(expense\\)|\\(expense\\) income|expense \\(income\\))(, net)?"]
+
+[income_continuing_ops]
+statement = "IS"
+name = "Income from continuing operations"
+concepts = ["IncomeLossFromContinuingOperations"]
+labels = ["(net )?(income|loss|income \\(loss\\)|\\(loss\\) income) from continuing operations"]
+
+[nci_income]
+statement = "IS"
+name = "Net income to non-controlling interests"
+concepts = ["NetIncomeLossAttributableToNoncontrollingInterest"]
+labels = []
+
+[comprehensive_income]
+statement = "IS"
+name = "Comprehensive income"
+concepts = [
+  "ComprehensiveIncomeNetOfTax",
+  "ComprehensiveIncomeNetOfTaxIncludingPortionAttributableToNoncontrollingInterest",
+]
+labels = ["(total )?comprehensive (income|loss|income \\(loss\\)|\\(loss\\) income)"]
+
+[prepaid_assets]
+statement = "BS"
+name = "Prepaid and other current assets"
+concepts = ["PrepaidExpenseAndOtherAssetsCurrent", "PrepaidExpenseCurrent", "OtherAssetsCurrent"]
+labels = ["prepaid expenses?( and other current assets)?", "other current assets"]
+
+[operating_lease_rou]
+statement = "BS"
+name = "Right-of-use assets"
+concepts = ["OperatingLeaseRightOfUseAsset"]
+labels = ["(operating lease )?right[- ]of[- ]use assets?(, net)?"]
+
+[other_assets_noncurrent]
+statement = "BS"
+name = "Other non-current assets"
+concepts = ["OtherAssetsNoncurrent"]
+labels = ["other (long-term|non-?current) assets"]
+
+[accounts_payable]
+statement = "BS"
+name = "Accounts payable"
+concepts = ["AccountsPayableCurrent", "AccountsPayableAndAccruedLiabilitiesCurrent"]
+labels = ["accounts payable( and accrued (expenses|liabilities))?"]
+
+[accrued_liabilities]
+statement = "BS"
+name = "Accrued liabilities"
+concepts = ["AccruedLiabilitiesCurrent"]
+labels = ["accrued (expenses|liabilities)( and other current liabilities)?"]
+
+[deferred_tax_liabilities]
+statement = "BS"
+name = "Deferred tax liabilities"
+concepts = ["DeferredIncomeTaxLiabilitiesNet", "DeferredTaxLiabilitiesNoncurrent"]
+labels = ["deferred (income )?tax liabilit(y|ies)(, net)?"]
+
+[other_liabilities_noncurrent]
+statement = "BS"
+name = "Other non-current liabilities"
+concepts = ["OtherLiabilitiesNoncurrent"]
+labels = ["other (long-term|non-?current) liabilities"]
+
+[common_stock]
+statement = "BS"
+name = "Common stock (par value)"
+concepts = ["CommonStockValue"]
+labels = []
+
+[aoci]
+statement = "BS"
+name = "Accumulated other comprehensive income"
+concepts = ["AccumulatedOtherComprehensiveIncomeLossNetOfTax"]
+labels = ["accumulated other comprehensive (income|loss|income \\(loss\\)|\\(loss\\) income)"]
+
+[nci]
+statement = "BS"
+name = "Non-controlling interests"
+concepts = ["MinorityInterest"]
+labels = ["non-?controlling interests?"]
+
+[sbc]
+statement = "CF"
+name = "Stock-based compensation"
+concepts = ["ShareBasedCompensation", "AllocatedShareBasedCompensationExpense"]
+labels = []
+
+[d_and_a]
+statement = "CF"
+name = "Depreciation & amortization"
+concepts = ["DepreciationDepletionAndAmortization", "DepreciationAndAmortization", "Depreciation"]
+labels = []
+
+[deferred_tax_expense]
+statement = "CF"
+name = "Deferred income taxes"
+concepts = ["DeferredIncomeTaxExpenseBenefit", "DeferredIncomeTaxesAndTaxCredits"]
+labels = []
+
+[chg_prepaid]
+statement = "CF"
+name = "Change in prepaid and other assets"
+concepts = ["IncreaseDecreaseInPrepaidDeferredExpenseAndOtherAssets", "IncreaseDecreaseInPrepaidExpense", "IncreaseDecreaseInOtherCurrentAssets"]
+labels = []
+
+[chg_accounts_payable]
+statement = "CF"
+name = "Change in payables"
+concepts = ["IncreaseDecreaseInAccountsPayable", "IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"]
+labels = []
+
+[chg_accrued]
+statement = "CF"
+name = "Change in accrued liabilities"
+concepts = ["IncreaseDecreaseInAccruedLiabilities", "IncreaseDecreaseInOtherAccruedLiabilities"]
+labels = []

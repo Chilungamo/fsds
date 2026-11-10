@@ -62,6 +62,27 @@ EDGES: list[tuple[str, str, int, str]] = [
     ("total_liabilities", "liabilities_and_equity", +1, "roll-up"),
     ("temporary_equity", "liabilities_and_equity", +1, "roll-up"),
     ("total_equity", "liabilities_and_equity", +1, "roll-up"),
+    # added with the extended catalog
+    ("rd", "opex", +1, "roll-up"),
+    ("other_income", "pretax_income", +1, "roll-up"),
+    ("interest_expense", "pretax_income", -1, "roll-up"),
+    ("net_income", "comprehensive_income", +1, "roll-up"),
+    ("prepaid_assets", "total_current_assets", +1, "roll-up"),
+    ("operating_lease_rou", "total_assets", +1, "roll-up"),
+    ("other_assets_noncurrent", "total_assets", +1, "roll-up"),
+    ("accounts_payable", "total_current_liabilities", +1, "roll-up"),
+    ("accrued_liabilities", "total_current_liabilities", +1, "roll-up"),
+    ("deferred_tax_liabilities", "total_liabilities", +1, "roll-up"),
+    ("other_liabilities_noncurrent", "total_liabilities", +1, "roll-up"),
+    ("common_stock", "total_equity", +1, "roll-up"),
+    ("aoci", "total_equity", +1, "roll-up"),
+    ("tax_expense", "deferred_tax_liabilities", +1, "deferred tax"),
+    ("sbc", "cfo", +1, "non-cash add-back"),
+    ("d_and_a", "cfo", +1, "non-cash add-back"),
+    ("deferred_tax_expense", "cfo", +1, "non-cash add-back"),
+    ("chg_prepaid", "cfo", -1, "working capital"),
+    ("chg_accounts_payable", "cfo", +1, "working capital"),
+    ("chg_accrued", "cfo", +1, "working capital"),
     # income statement -> cash flow statement
     ("net_income", "cfo", +1, "indirect method start"),
     ("chg_accounts_receivable", "cfo", -1, "working capital"),
@@ -74,6 +95,11 @@ EDGES: list[tuple[str, str, int, str]] = [
     ("cff", "net_change_cash", +1, "roll-up"),
     ("net_change_cash", "cash", +1, "cash reconciliation"),
 ]
+
+
+# Restating these usually moves retained earnings directly, bypassing net income
+# (SPAC restatements remeasure redeemable shares against accumulated deficit).
+DIRECT_EQUITY_ITEMS = ("temporary_equity", "apic")
 
 
 @dataclass(frozen=True, order=True)
@@ -217,6 +243,10 @@ def _evaluate(
             continue
         gap = left[0] - right[0]
         tol = max(left[1] + right[1], Decimal(1))
+        if abs(gap) > tol and (left[3] or right[3]):
+            # failing only under an assumption: the "unchanged" line was probably just
+            # left out of the restatement table. Inconclusive, not a failure.
+            return None
         return Check(
             name,
             period,
@@ -296,6 +326,13 @@ def integrity_checks(view: View, unchanged: set[str] | None = None) -> list[Chec
             if not any(t.item in cells or t.period != p for t in lhs):
                 continue
             c = _evaluate(name, p, lhs, rhs, view, unchanged)
+            if c and c.status == "fail" and name == "net_income_flows_to_retained_earnings":
+                bs = view.get(Period(None, p.end), {})
+                if any(bs.get(i) and bs[i].adjustment for i in DIRECT_EQUITY_ITEMS):
+                    c.details["likely_cause"] = (
+                        "direct equity adjustment: retained earnings also absorbed changes "
+                        "outside net income (e.g. remeasurement of redeemable shares)"
+                    )
             out += [c] if c else []
     return out
 

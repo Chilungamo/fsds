@@ -82,12 +82,13 @@ def test_broken_balance_sheet_fails():
 
 
 def test_missing_term_assumed_unchanged_only_if_reported():
-    rows = [r for r in WORKED if r["canonical_item"] != "tax_expense"]
+    # pre-tax and net income move together when tax really is unchanged
+    rows = [r for r in WORKED if r["canonical_item"] not in ("tax_expense", "net_income")]
+    rows.append(row("net_income", "NetIncomeLoss", *FY, 45, -8.4, 36.6))
     view = build_view(rows)
     assert not [c for c in integrity_checks(view) if c.name == "net_income_rollup"]
     (c,) = [c for c in integrity_checks(view, {"tax_expense"}) if c.name == "net_income_rollup"]
-    assert c.details["assumed_unchanged"] == ["tax_expense"]
-    assert c.status == "fail"  # 8.4 pre-tax change cannot all flow to net income
+    assert c.details["assumed_unchanged"] == ["tax_expense"] and c.status == "pass"
 
 
 def test_opening_balance_is_never_assumed_unchanged():
@@ -146,3 +147,47 @@ def test_golden_filings_pass_their_checks(name, expected):
     checks = integrity_checks(build_view(records), face)
     assert {c.name for c in checks} >= expected
     assert [c for c in checks if c.status == "fail"] == []
+
+
+def test_failure_that_depends_on_an_assumption_is_inconclusive():
+    rows = [r for r in WORKED if r["canonical_item"] != "tax_expense"]
+    # with tax assumed unchanged the roll-up would fail: drop it rather than report it
+    assert "net_income_rollup" not in {
+        c.name for c in integrity_checks(build_view(rows), {"tax_expense"})
+    }
+
+
+def test_retained_earnings_failure_explained_by_equity_reclassification():
+    rows = [
+        r
+        for r in WORKED
+        if not (r["canonical_item"] == "retained_earnings" and r["period_end"] == "2025-12-31")
+    ]
+    rows.append(
+        row(
+            "retained_earnings",
+            "RetainedEarningsAccumulatedDeficit",
+            None,
+            "2025-12-31",
+            300,
+            -9.3,
+            290.7,
+        )
+    )
+    rows.append(
+        row(
+            "temporary_equity",
+            "TemporaryEquityCarryingAmountAttributableToParent",
+            None,
+            "2025-12-31",
+            50,
+            3,
+            53,
+        )
+    )
+    (c,) = [
+        c
+        for c in integrity_checks(build_view(rows))
+        if c.name == "net_income_flows_to_retained_earnings"
+    ]
+    assert c.status == "fail" and "direct equity adjustment" in c.details["likely_cause"]

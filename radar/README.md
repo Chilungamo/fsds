@@ -7,6 +7,7 @@ Backend for a real-time dashboard of SEC financial restatements (see the living 
 |---|---|---|
 | M0 | EDGAR client, iXBRL restatement extractor, golden fixtures | done — 46/46 hand-checked line items match |
 | M1 | Live detection: feed watcher, Item 4.02 parser, amendment triage, Postgres schema, reconciliation, backfill | done — 100% recall (14/14) over 30 days; 1,998 cases since 2019 |
+| M2 | Line-item deltas (XBRL, HTML tables, companyfacts), normaliser, propagation engine, integrity checks, severity | done — deltas for 97.1% of confirmed cases (target 80%); 89.9% of 5,070 checks pass |
 
 ## What's here
 
@@ -202,3 +203,73 @@ The database tests need a Postgres database they may wipe (default
    (7 of the 15 sampled), which a later milestone has to triage.
 6. EDGAR answers both throttling and a missing Archives file (e.g. a weekend daily index)
    with HTTP 403; only throttling (identified by its message) is retried.
+
+---
+
+# M2 — Deltas and propagation
+
+```
+amendment ──► raw store ──► XBRL restatement axis ──┐
+                         └► HTML "as reported | adjustment | as restated" tables (fallback)
+                         └► companyfacts: amendment value vs first-filed value (fallback)
+                                                     │
+                       canonical.toml (62 line items)│ normalise
+                                                     ▼
+              fact_delta ──► case_delta view (latest filing wins per line item and period)
+                                                     │
+                       radar.propagate.engine ───────┤ integrity checks, impact graph, severity
+                                                     ▼
+                       integrity_check, impact_edge, restatement_case.severity
+```
+
+| Module | Purpose |
+|---|---|
+| `radar/normalize/canonical.toml` | Canonical line items: us-gaap concepts (in order of preference) and row-label patterns |
+| `radar/extract/html_tables.py` | Reads printed restatement tables (colspan grid, role column bands, periods from header, header cells or section rows, "in thousands" captions, presentation signs) |
+| `radar/extract/companyfacts.py` | Deltas for amendments that print only restated statements |
+| `radar/propagate/engine.py` | Checks: balance sheet balances, gross profit and net income roll-ups, cash flow sums, net income → retained earnings; impact graph; severity |
+| `radar/enrich.py` | Stores deltas and analyses cases; also runs inside the pipeline for new amendments |
+| `radar/storage.py` | Raw documents (gzip, `RADAR_RAW_DIR`) so every parse can be re-run offline |
+
+```bash
+radar enrich
+```
+
+```bash
+radar deltas 1956
+```
+
+```bash
+radar graph 167
+```
+
+## Results (all confirmed cases, Nov 2026)
+
+| Measure | Result |
+|---|---|
+| Confirmed cases with line-item deltas | 1,042 of 1,073 (97.1%) |
+| Source | XBRL only 773 · HTML 176 · companyfacts 43 · combinations 50 |
+| Integrity checks passing | 89.9% of 5,070 — balance sheet 98.6%, gross profit 93.5%, cash flow 93.1%, net income roll-up 87.1%, retained earnings 80.5% |
+| Changed rows mapped to a canonical item | XBRL 68.6%, HTML 65.1%, companyfacts 100% |
+
+## Findings
+
+1. **A case is more than one filing.** Core Scientific restated through a 10-K/A and
+   three 10-Q/As; only together do they give the opening balances that let the retained-
+   earnings roll-forward be checked (the PP&E error grows from $97.3M to $127.3M).
+2. **Opening balances are never "unchanged".** They carry every earlier error; assuming
+   otherwise produced a false $122.9M failure for Core's Q1 2025.
+3. **A missing line is not an unchanged line.** Restatement tables often omit lines that
+   did change (e.g. pre-tax income). A check that fails only under such an assumption is
+   dropped as inconclusive.
+4. **Retained earnings often moves without net income.** SPAC restatements remeasure
+   redeemable shares directly against accumulated deficit: cases that change temporary
+   equity or APIC fail the roll-forward 26% of the time (11% otherwise). Such failures are
+   annotated with that likely cause instead of being reported as errors.
+5. **Printed tables use presentation signs** (expenses in parentheses); they are converted
+   to XBRL's natural signs before checks run.
+6. **Some amendments print no reconciliation at all**, only restated statements. Comparing
+   the amendment's tagged values with the first-filed values (SEC companyfacts) recovered
+   105 such filings.
+7. **Never guess a number.** A column band holding two numbers once produced values like
+   $5.5 × 10²⁰; ambiguous cells now yield nothing.

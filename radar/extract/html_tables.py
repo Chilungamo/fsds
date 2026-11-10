@@ -37,7 +37,11 @@ _ROLE_PATTERNS = [
     ),
     (
         ADJ,
-        re.compile(r"adjust|correction|impact|effect of|reclassification|\berrors?\b|change", re.I),
+        re.compile(
+            r"adjust|correction|impact|effect of|reclassification|\berrors?\b|change"
+            r"|difference|variance",
+            re.I,
+        ),
     ),
     (REST, re.compile(r"restated|as revised|as corrected|as adjusted|revised", re.I)),
 ]
@@ -79,6 +83,11 @@ _PER_SHARE = re.compile(r"per (?:common |ordinary )?share|\beps\b", re.I)
 _SHARE_COUNT = re.compile(
     r"(?:weighted|number of|outstanding).*shares|shares.*(?:outstanding|issued)", re.I
 )
+# Expense lines: XBRL stores them positive, but many printed tables show them negative.
+EXPENSE_ITEMS = {"cogs", "sga", "opex", "impairment", "rd", "interest_expense", "tax_expense"}
+_BENEFIT_POSITIVE = re.compile(
+    r"\(expense\)\s*benefit|benefit\s*\(expense\)|\(provision\)\s*benefit", re.I
+)
 _NUMBER = re.compile(r"\(?-?\$?\s*\d[\d,]*(?:\.\d+)?\)?")
 
 
@@ -115,24 +124,39 @@ def clean(text: str) -> str:
     return " ".join(text.split())
 
 
+_TOKEN = re.compile(r"(?P<neg>\(|-|–|—)?\s*\$?\s*(?P<num>\d[\d,]*(?:\.\d+)?)")
+
+
+def number_tokens(text: str) -> list[Decimal]:
+    """Every number in ``text``; "(6,648" and "-6,648" are negative."""
+    t = clean(text).replace("$", " ")
+    out = []
+    for m in _TOKEN.finditer(t):
+        digits = m["num"].replace(",", "")
+        if digits.count(".") > 1:
+            continue
+        try:
+            value = Decimal(digits)
+        except InvalidOperation:
+            continue
+        out.append(-value if m["neg"] else value)
+    return out
+
+
 def parse_number(text: str) -> Decimal | None:
-    """'$ (6,648 )' -> -6648; '—' or '-' -> 0; '' -> None."""
-    t = clean(text).replace("$", "").replace(" ", "")
+    """'$ (6,648 )' -> -6648; '—' or '-' -> 0; '' -> None.
+
+    Text holding two different numbers is ambiguous (a column band that overlaps its
+    neighbour) and yields None rather than a guess."""
+    t = clean(text)
     if not t:
         return None
-    if re.fullmatch(r"[-–—]+|nil|none", t, re.I):
-        return Decimal(0)
-    m = _NUMBER.search(t)
-    if not m:
+    tokens = number_tokens(t)
+    if not tokens:
+        return Decimal(0) if re.fullmatch(r"[\s$()]*[-–—]+[\s$()]*|nil|none", t, re.I) else None
+    if len(set(tokens)) > 1:
         return None
-    raw = m.group(0)
-    negative = raw.startswith("(") or "(" in t.split(raw)[0] or raw.lstrip("($ ").startswith("-")
-    digits = re.sub(r"[^\d.]", "", raw)
-    try:
-        value = Decimal(digits)
-    except InvalidOperation:
-        return None
-    return -value if negative else value
+    return tokens[0]
 
 
 def _month_end(y: int, m: int) -> date:
@@ -308,6 +332,8 @@ def extract_table(table, form: str = "") -> list[HtmlRow]:
     if not found:
         return []
     header_end, groups = found
+    if not groups:
+        return []
     above = " ".join(" ".join(dict.fromkeys(r)) for r in rows[: header_end + 1])
     before = preceding_text(table)
     scale_m = list(_SCALE_RE.finditer(f"{before} {above}"))
@@ -370,6 +396,28 @@ def extract_table(table, form: str = "") -> list[HtmlRow]:
     return out
 
 
+def natural_signs(rows: list[HtmlRow]) -> list[HtmlRow]:
+    """Convert printed signs to XBRL's natural signs for expense lines.
+
+    A table that prints non-tax expenses as negatives uses presentation signs throughout,
+    so all its expense lines flip; a tax line labelled "(expense) benefit" always flips.
+    """
+    presentation = any(
+        r.canonical_item in EXPENSE_ITEMS - {"tax_expense"}
+        and (r.previously_reported or 0) < 0
+        and (r.restated or 0) < 0
+        for r in rows
+    )
+    for r in rows:
+        if r.canonical_item in EXPENSE_ITEMS and (
+            presentation or _BENEFIT_POSITIVE.search(r.label)
+        ):
+            r.previously_reported, r.adjustment, r.restated = (
+                None if v is None else -v for v in (r.previously_reported, r.adjustment, r.restated)
+            )
+    return rows
+
+
 def extract_html(raw: bytes, form: str = "") -> list[HtmlRow]:
     """All restatement-table rows in a document, first occurrence of each line kept."""
     doc = lxml_html.fromstring(raw)
@@ -382,7 +430,7 @@ def extract_html(raw: bytes, form: str = "") -> list[HtmlRow]:
             and ("restated" in text or "adjust" in text or "revised" in text)
         ):
             continue
-        for row in extract_table(table, form):
+        for row in natural_signs(extract_table(table, form)):
             key = (row.concept, row.period_start, row.period_end)
             if key not in seen:
                 seen.add(key)

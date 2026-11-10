@@ -17,6 +17,7 @@ from psycopg.types.json import Jsonb
 from radar.db import repo
 from radar.edgar.client import EdgarClient
 from radar.edgar.submissions import SubmissionsCache
+from radar.extract.companyfacts import companyfacts_deltas
 from radar.extract.html_tables import extract_html
 from radar.extract.ixbrl import RestatementExtraction, extract, fmt_decimal
 from radar.normalize.normalize import catalog
@@ -25,7 +26,7 @@ from radar.storage import RawStore
 
 log = logging.getLogger(__name__)
 
-ENRICH_VERSION = "enrich/1"
+ENRICH_VERSION = "enrich/2"
 
 
 @dataclass
@@ -162,6 +163,15 @@ def enrich_filing(
     if raw is None:
         _, raw = fetch_document(edgar, store, subs or SubmissionsCache(edgar), row)
     source, records, face_items = deltas_from_document(raw)
+    if source is None and row.get("filed_date"):
+        # no restatement table at all: compare with the values originally filed
+        facts = edgar.companyfacts(row["cik"])
+        records = [
+            r
+            for r in companyfacts_deltas(facts, row["accession"], row["filed_date"])
+            if r["adjustment"]
+        ]
+        source = "companyfacts" if records else None
     for r in records:
         r["source"] = source
     store_deltas(conn, row["accession"], records)
