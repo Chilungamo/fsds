@@ -9,10 +9,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from psycopg.rows import dict_row
@@ -26,6 +28,7 @@ WEB_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
 # Streams end after this long; EventSource reconnects with Last-Event-ID and the replay
 # fills the gap, so connections are recycled without losing events.
 STREAM_MAX_SECONDS = int(os.environ.get("RADAR_STREAM_MAX_SECONDS", "300"))
+API_CACHE_SECONDS = int(os.environ.get("RADAR_API_CACHE_SECONDS", "15"))
 
 
 def create_app(database_url: str | None = None, web_dist: Path | None = WEB_DIST) -> FastAPI:
@@ -41,6 +44,19 @@ def create_app(database_url: str | None = None, web_dist: Path | None = WEB_DIST
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         pool.open(wait=True)
+        watcher = None
+        stopping = threading.Event()
+        if os.environ.get("RADAR_EMBEDDED_WATCHER") == "1":
+            # budget deployments: poll EDGAR from the web process (one instance wins the lock)
+            from radar.workers.watch import run_singleton
+
+            watcher = threading.Thread(
+                target=run_singleton,
+                kwargs={"database_url": url, "stop": stopping.is_set, "sleep": stopping.wait},
+                name="embedded-watcher",
+                daemon=True,
+            )
+            watcher.start()
         broadcaster = Broadcaster(url)
         app.state.broadcaster = broadcaster
         task = asyncio.create_task(broadcaster.run())
@@ -52,9 +68,28 @@ def create_app(database_url: str | None = None, web_dist: Path | None = WEB_DIST
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+        stopping.set()
         pool.close()
 
     app = FastAPI(title="Restatement Radar", version="0.3", lifespan=lifespan)
+    # Bandwidth is billed by most hosts: compress (Starlette skips text/event-stream).
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+
+    @app.middleware("http")
+    async def cache_headers(request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith("/assets/"):  # content-hashed file names never change
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif path.startswith("/api/stream"):
+            response.headers["Cache-Control"] = "no-cache"
+        elif path.startswith("/api/") and request.method == "GET" and response.status_code == 200:
+            # data changes when filings arrive; a short shared cache lets a CDN absorb spikes
+            response.headers["Cache-Control"] = f"public, max-age={API_CACHE_SECONDS}"
+        elif not path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-cache"  # index.html: always revalidate
+        return response
+
     app.state.pool = pool
     app.state.database_url = url
 

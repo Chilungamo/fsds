@@ -1,0 +1,7 @@
+# Automatic HTTPS in front of the dashboard. Replace the host name with yours.
+radar.example.com {
+	encode zstd gzip
+	reverse_proxy web:8000 {
+		flush_interval -1   # do not buffer the live event stream
+	}
+}

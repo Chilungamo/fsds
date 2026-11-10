@@ -387,3 +387,35 @@ def test_case_view_prefers_the_latest_filing(conn):
         )
     (row,) = conn.execute("SELECT * FROM case_delta WHERE case_id = %s", (case_id,)).fetchall()
     assert row["adjustment"] == -7 and row["accession"] == "0000000009-26-000002"
+
+
+def test_only_one_embedded_watcher_runs(conn):
+    """Two web instances embedding the watcher: the advisory lock lets exactly one poll."""
+    from radar.workers import watch
+
+    with psycopg.connect(TEST_DB, autocommit=True) as holder:
+        assert holder.execute("SELECT pg_try_advisory_lock(%s)", (watch.WATCHER_LOCK,)).fetchone()[
+            0
+        ]
+        polls = []
+        original = watch.poll_once
+        watch.poll_once = lambda *a, **k: polls.append(1) or watch.PollResult()
+        try:
+            rounds = iter(range(3))
+            watch.run_singleton(
+                TEST_DB, interval=0, stop=lambda: next(rounds, None) is None, sleep=lambda s: None
+            )
+            assert polls == []  # lock held elsewhere: never polled
+        finally:
+            watch.poll_once = original
+
+
+def test_embedded_watcher_polls_when_lock_is_free(conn, monkeypatch):
+    from radar.workers import watch
+
+    monkeypatch.setenv("RADAR_SEC_USER_AGENT", "RestatementRadar/test test@example.com")
+    polls = []
+    monkeypatch.setattr(watch, "poll_once", lambda *a, **k: polls.append(1) or watch.PollResult())
+    watch.run_singleton(TEST_DB, interval=0, stop=lambda: len(polls) >= 1, sleep=lambda s: None)
+    assert polls == [1]
+    assert repo.get_cursor(conn, "watch:started")  # latency baseline recorded

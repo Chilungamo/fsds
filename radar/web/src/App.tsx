@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type CaseSummary, type RadarEvent, type Stats } from "./api";
+import { api, bustCache, type CaseSummary, type RadarEvent, type Stats } from "./api";
 import { CaseView } from "./components/CaseView";
 import { Feed } from "./components/Feed";
 import { StatsStrip } from "./components/StatsStrip";
@@ -95,6 +95,7 @@ export function App() {
   const refresh = useRef<ReturnType<typeof setTimeout>>();
   const connected = useEventStream((e: RadarEvent) => {
     if (e.case_id === null) return;
+    bustCache(e.id);
     const caseId = e.case_id;
     setFresh((s) => new Set(s).add(caseId));
     setTimeout(() => setFresh((s) => { const n = new Set(s); n.delete(caseId); return n; }), 3500);

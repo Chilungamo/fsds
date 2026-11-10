@@ -1,0 +1,34 @@
+# Fly.io alternative to render.yaml (see docs/DEPLOY.md).
+#   fly launch --no-deploy --copy-config      # creates the app from this file
+#   fly secrets set RADAR_SEC_USER_AGENT="RestatementRadar/0.1 you@example.com" \
+#                   RADAR_DATABASE_URL="postgresql://..."     # Fly Managed Postgres or an external one
+#   fly deploy
+app = "restatement-radar"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  release_command = "radar migrate"
+
+[env]
+  RADAR_EMBEDDED_WATCHER = "1"   # one machine polls EDGAR (advisory lock); "0" if you add a watcher process
+  RADAR_SEC_RATE = "3"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "off"     # the watcher and live streams need an always-on machine
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    method = "GET"
+    path = "/api/health"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

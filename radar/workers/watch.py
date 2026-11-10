@@ -51,6 +51,35 @@ def poll_once(conn: psycopg.Connection, edgar: EdgarClient) -> PollResult:
     return result
 
 
+WATCHER_LOCK = 4_020_402  # pg advisory lock id: one watcher per database
+
+
+def run_singleton(
+    database_url: str,
+    interval: float = 60.0,
+    stop: Callable[[], bool] = lambda: False,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Run the watcher only while holding a Postgres advisory lock, so any number of
+    web instances can embed it and exactly one polls EDGAR. If the holder dies, its
+    session ends, the lock is released and another instance takes over."""
+    while not stop():
+        try:
+            with repo.connect(database_url) as conn:
+                got = conn.execute(
+                    "SELECT pg_try_advisory_lock(%s) AS ok", (WATCHER_LOCK,)
+                ).fetchone()["ok"]
+                if not got:
+                    sleep(interval)
+                    continue
+                log.warning("embedded watcher acquired the lock; polling EDGAR")
+                with EdgarClient() as edgar:
+                    run(conn, edgar, interval=interval, stop=stop, sleep=sleep)
+        except Exception:
+            log.exception("embedded watcher crashed; retrying")
+            sleep(interval)
+
+
 def run(
     conn: psycopg.Connection,
     edgar: EdgarClient,
@@ -58,6 +87,7 @@ def run(
     once: bool = False,
     on_cycle: Callable[[PollResult, list[Outcome]], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    stop: Callable[[], bool] = lambda: False,
 ) -> None:
     pipeline = Pipeline(conn, edgar)
     # latency is only meaningful for filings accepted while the watcher is running;
@@ -75,6 +105,6 @@ def run(
             polled, outcomes = PollResult(), []
         if on_cycle:
             on_cycle(polled, outcomes)
-        if once:
+        if once or stop():
             return
         sleep(max(0.0, interval - (time.monotonic() - started)))

@@ -153,8 +153,9 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
     from radar.workers.reconcile import reconcile
 
     end = _day(args.end) if args.end else date.today() - timedelta(days=1)
+    start = _day(args.start) if args.start else end - timedelta(days=args.days - 1)
     with _db() as conn, EdgarClient() as edgar:
-        for r in reconcile(conn, edgar, _day(args.start), end):
+        for r in reconcile(conn, edgar, start, end):
             if r.available:
                 print(
                     f"{r.day}: {r.listed} listed, {r.missing} new, "
@@ -413,7 +414,7 @@ def main(argv: list[str] | None = None) -> int:
         ("recall", cmd_recall, "detection recall vs full-text search"),
     ):
         c = sub.add_parser(name, help=helptext)
-        c.add_argument("start", help="YYYY-MM-DD")
+        c.add_argument("start", nargs="?" if name == "reconcile" else None, help="YYYY-MM-DD")
         c.add_argument("end", nargs="?", help="YYYY-MM-DD (default: today/yesterday)")
         c.set_defaults(func=func)
         if name == "backfill":
@@ -421,6 +422,10 @@ def main(argv: list[str] | None = None) -> int:
                 "--amendments",
                 action="store_true",
                 help="also enqueue candidate restatement 10-K/As and 10-Q/As",
+            )
+        if name == "reconcile":
+            c.add_argument(
+                "--days", type=int, default=3, help="without START: this many days up to END"
             )
         if name == "recall":
             c.add_argument("--target", type=float, default=0.99)

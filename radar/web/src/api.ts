@@ -126,8 +126,16 @@ export interface RadarEvent {
   payload: Record<string, unknown>;
 }
 
+// API responses may be cached for a few seconds (browser or CDN). After a live event the
+// app sets this to the event id, giving later requests a new cache key so they see it.
+let cacheVersion: number | null = null;
+export function bustCache(version: number) {
+  cacheVersion = version;
+}
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: { Accept: "application/json" } });
+  const url = cacheVersion === null ? path : `${path}${path.includes("?") ? "&" : "?"}v=${cacheVersion}`;
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${path}`);
   return res.json() as Promise<T>;
 }
