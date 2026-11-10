@@ -51,6 +51,19 @@ class EdgarError(RuntimeError):
     pass
 
 
+_THROTTLE_MARKERS = ("Request Rate Threshold Exceeded", "Undeclared Automated Tool")
+
+
+def is_throttled(resp: httpx.Response) -> bool:
+    """EDGAR answers both throttling and missing Archives paths with 403; only the
+    former is worth retrying."""
+    try:
+        text = resp.text[:5000]
+    except Exception:  # undecodable body
+        return False
+    return any(m in text for m in _THROTTLE_MARKERS)
+
+
 class EdgarClient:
     """Synchronous EDGAR client honouring the SEC fair-access policy.
 
@@ -98,7 +111,9 @@ class EdgarClient:
             except httpx.TransportError as exc:
                 last = exc
             else:
-                if resp.status_code not in RETRY_STATUSES:
+                if resp.status_code not in RETRY_STATUSES or (
+                    resp.status_code == 403 and not is_throttled(resp)
+                ):
                     resp.raise_for_status()
                     return resp
                 last = resp
@@ -110,6 +125,16 @@ class EdgarClient:
 
     def get_json(self, url: str) -> Any:
         return self.get(url).json()
+
+    def get_optional(self, url: str) -> httpx.Response | None:
+        """Like :meth:`get` but returns None for missing resources (404, or a plain 403,
+        which is how EDGAR Archives answers for e.g. a daily index on a weekend)."""
+        try:
+            return self.get(url)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (403, 404):
+                return None
+            raise
 
     # --- convenience wrappers -------------------------------------------------
 

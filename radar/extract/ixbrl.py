@@ -131,6 +131,7 @@ class RestatementExtraction:
     cover: dict[str, str]
     rows: list[RestatementRow]
     axes_seen: dict[str, set[str]]  # restatement axis -> members used in the document
+    face_concepts: set[str] = field(default_factory=set)  # local names of undimensioned facts
 
     @property
     def has_restatement_dimension(self) -> bool:
@@ -305,6 +306,7 @@ def extract(xhtml: bytes) -> RestatementExtraction:
     unit_map = units(root)
 
     axes_seen: dict[str, set[str]] = defaultdict(set)  # only axes used by actual facts
+    face: set[str] = set()
 
     # (concept, start, end, unit, other dims) -> role -> [(value, decimals)]
     cells: dict[tuple, dict[str, list[tuple[Decimal, float]]]] = defaultdict(
@@ -317,6 +319,8 @@ def extract(xhtml: bytes) -> RestatementExtraction:
         value = fact_value(el)
         if c is None or value is None:
             continue
+        if not c.dims:
+            face.add(local(el.get("name")))
         dims = dict(c.dims)
         member = None
         for axis in list(dims):
@@ -370,7 +374,9 @@ def extract(xhtml: bytes) -> RestatementExtraction:
         rows.append(row)
 
     rows.sort(key=lambda r: (r.period_end or "", r.period_start or "", r.concept, str(r.dims)))
-    return RestatementExtraction(cover=cover_facts(root), rows=rows, axes_seen=dict(axes_seen))
+    return RestatementExtraction(
+        cover=cover_facts(root), rows=rows, axes_seen=dict(axes_seen), face_concepts=face
+    )
 
 
 def extract_file(path: str | Path) -> RestatementExtraction:

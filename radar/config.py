@@ -30,3 +30,10 @@ def sec_rate_limit() -> float:
     """Requests per second across this process (SEC allows at most 10)."""
     rate = float(os.environ.get("RADAR_SEC_RATE", "5"))
     return min(max(rate, 0.1), 9.0)
+
+
+DEFAULT_DATABASE_URL = "postgresql://radar:radar@localhost:5432/radar"
+
+
+def database_url() -> str:
+    return os.environ.get("RADAR_DATABASE_URL", DEFAULT_DATABASE_URL)
