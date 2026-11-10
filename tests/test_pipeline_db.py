@@ -126,6 +126,7 @@ def test_live_feed_8k_then_amendment(conn):
     assert events(conn) == [
         ("case.created", "0001193125-26-098600"),
         ("case.confirmed", "0001193125-26-098732"),
+        ("case.enriched", None),  # M2: deltas, checks and graph computed
     ]
     meta = conn.execute(
         "SELECT meta FROM filing WHERE accession = '0001193125-26-098732'"
@@ -148,7 +149,7 @@ def test_backfill_order_amendment_before_8k(conn):
     assert case["status"] == "CONFIRMED" and case["sub_item"] == "a"
     assert set(links(conn, case["id"]).values()) == {"warning", "amendment"}
     assert len(periods(conn, case["id"], "item402")) == 6
-    assert [e for e, _ in events(conn)] == ["case.created", "case.updated"]
+    assert [e for e, _ in events(conn)] == ["case.created", "case.enriched", "case.updated"]
 
 
 def test_cases_are_kept_apart_by_company_and_time(conn):
@@ -299,3 +300,90 @@ def test_events_are_notified(conn):
     payload = json.loads(note.payload)
     assert payload["type"] == "case.created"
     assert payload["accession"] == "0001213900-25-077935"
+
+
+# --- M2: enrichment -------------------------------------------------------------------
+
+
+def test_confirmed_amendment_is_enriched(conn, tmp_path):
+    from pathlib import Path
+
+    edgar = FakeEdgar().client()
+    repo.insert_filing(conn, ref("0001193125-26-098600"))
+    out = Pipeline(conn, edgar).drain()
+    assert any("deltas (xbrl)" in o.detail for o in out)
+
+    (case,) = case_rows(conn)
+    assert case["severity"] is not None and case["enriched_at"] is not None
+    deltas = conn.execute("SELECT * FROM case_delta WHERE case_id = %s", (case["id"],)).fetchall()
+    goodwill = [d for d in deltas if d["canonical_item"] == "goodwill"]
+    assert goodwill[0]["adjustment"] == -43_166_000 and goodwill[0]["source"] == "xbrl"
+    checks = conn.execute(
+        "SELECT name, status FROM integrity_check WHERE case_id = %s", (case["id"],)
+    ).fetchall()
+    assert checks and {c["status"] for c in checks} == {"pass"}
+    edges = conn.execute(
+        "SELECT src_item, dst_item, dst_delta FROM impact_edge WHERE case_id = %s", (case["id"],)
+    ).fetchall()
+    assert {"src_item": "impairment", "dst_item": "goodwill", "dst_delta": -43_166_000} in edges
+    assert "case.enriched" in [e for e, _ in events(conn)]
+    headline = {h["item"]: h for h in case["summary"]["deltas"]["headline"]}
+    assert headline["net_income"]["adjustment"] == "-43166000"
+    # the document was kept, so re-running costs no download
+    assert list(Path(os.environ["RADAR_RAW_DIR"]).rglob("ulh-20250927.htm.gz"))
+
+
+def test_html_only_amendment_is_enriched(conn):
+    """Protalix's 2019 10-Q/A has no XBRL restatement tags; the HTML table is used."""
+    from radar.enrich import enrich_case, enrich_filing
+    from radar.extract.ixbrl import load_document
+
+    from .conftest import FIXTURES
+
+    r = FilingRef(
+        accession="0001144204-19-014450",
+        cik=1006281,
+        form="10-Q/A",
+        company="Protalix BioTherapeutics, Inc.",
+        filed_date=date(2019, 3, 18),
+        primary_doc="tv515406_10qa.htm",
+        source="manual",
+    )
+    repo.insert_filing(conn, r)
+    case_id = repo.create_case(conn, 1006281, "BIG_R", "CONFIRMED")
+    repo.link_filing(conn, case_id, r.accession, "amendment")
+    row = conn.execute("SELECT * FROM filing").fetchone()
+    raw = load_document(FIXTURES / "filings" / "0001144204-19-014450_tv515406_10qa.htm.gz")
+
+    first = enrich_filing(conn, FakeEdgar().client(), row, raw=raw)
+    again = enrich_filing(conn, FakeEdgar().client(), row, raw=raw)  # idempotent
+    assert first.source == "html" and first.mapped > 0 and again == first
+    assert conn.execute("SELECT count(*) AS n FROM fact_delta").fetchone()["n"] == first.rows
+
+    result = enrich_case(conn, case_id)
+    assert result["checks_failed"] == 0
+    assert {"net_income", "revenue"} <= {h["item"] for h in result["headline"]}
+
+
+def test_case_view_prefers_the_latest_filing(conn):
+    """A 10-K/A filed after a 10-Q/A restates the same figure again; the case shows the
+    later number."""
+    for acc, filed in (
+        ("0000000009-26-000001", "2026-03-01"),
+        ("0000000009-26-000002", "2026-04-01"),
+    ):
+        repo.insert_filing(
+            conn,
+            FilingRef(acc, 9, "10-Q/A", "Example", date.fromisoformat(filed), source="manual"),
+        )
+    case_id = repo.create_case(conn, 9, "BIG_R", "CONFIRMED")
+    for acc, adj in (("0000000009-26-000001", -5), ("0000000009-26-000002", -7)):
+        repo.link_filing(conn, case_id, acc, "amendment")
+        conn.execute(
+            """INSERT INTO fact_delta (accession, concept, canonical_item, statement, period_end,
+                 previously_reported, adjustment, restated, source)
+               VALUES (%s, 'us-gaap:Goodwill', 'goodwill', 'BS', '2025-12-31', 100, %s, %s, 'xbrl')""",
+            (acc, adj, 100 + adj),
+        )
+    (row,) = conn.execute("SELECT * FROM case_delta WHERE case_id = %s", (case_id,)).fetchall()
+    assert row["adjustment"] == -7 and row["accession"] == "0000000009-26-000002"

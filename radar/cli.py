@@ -1,6 +1,8 @@
 """Command line entry point: ``radar <command>`` (or ``python -m radar``).
 
 M0  fetch, extract          download a filing / print its restatement table
+M2  enrich                  line-item deltas, integrity checks, impact graph, severity
+    deltas CASE / graph CASE show a case's restatement and how it propagates
 M1  migrate                 create or upgrade the database schema
     watch [--once]          poll EDGAR's live feed and process new filings
     process                 drain the work queue
@@ -214,6 +216,145 @@ def cmd_cases(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_enrich(args: argparse.Namespace) -> int:
+    """(Re)compute deltas for amendments of confirmed / needs-review cases."""
+    from radar.edgar.submissions import SubmissionsCache
+    from radar.enrich import ENRICH_VERSION, enrich_case, enrich_filing
+    from radar.storage import RawStore
+
+    with _db() as conn, EdgarClient() as edgar:
+        todo = conn.execute(
+            """SELECT f.*, cf.case_id FROM filing f
+               JOIN case_filing cf ON cf.accession = f.accession AND cf.role = 'amendment'
+               JOIN restatement_case rc ON rc.id = cf.case_id
+               WHERE rc.status IN ('CONFIRMED', 'NEEDS_REVIEW')
+                 AND (%s::bigint IS NULL OR rc.id = %s)
+                 AND (%s OR f.meta->'deltas'->>'version' IS DISTINCT FROM %s)
+                 AND abs(hashtext(f.accession)) %% %s = %s
+               ORDER BY f.filed_date DESC LIMIT %s""",
+            (
+                args.case,
+                args.case,
+                args.force,
+                ENRICH_VERSION,
+                args.shards,
+                args.shard,
+                args.limit or 10**9,
+            ),
+        ).fetchall()
+        store, subs = RawStore(), SubmissionsCache(edgar)
+        cases: set[int] = set()
+        by_source: dict[str, int] = {}
+        for i, row in enumerate(todo, 1):
+            try:
+                d = enrich_filing(conn, edgar, row, store=store, subs=subs)
+                by_source[d.source or "none"] = by_source.get(d.source or "none", 0) + 1
+            except Exception as exc:  # keep going; the error is recorded on the filing
+                by_source["error"] = by_source.get("error", 0) + 1
+                conn.execute(
+                    "UPDATE filing SET meta = meta || jsonb_build_object('enrich_error', %s::text)"
+                    " WHERE accession = %s",
+                    (f"{type(exc).__name__}: {exc}", row["accession"]),
+                )
+            cases.add(row["case_id"])
+            if i % 50 == 0 or i == len(todo):
+                print(f"filings {i}/{len(todo)} {by_source}", flush=True)
+        for case_id in sorted(cases):
+            enrich_case(conn, case_id)
+        print(f"enriched {len(cases)} cases")
+    return 0
+
+
+def _money(v) -> str:
+    if v is None:
+        return ""
+    return f"{v:,.2f}" if abs(v) < 100 and v != int(v) else f"{v:,.0f}"
+
+
+def cmd_deltas(args: argparse.Namespace) -> int:
+    from radar.normalize.normalize import catalog
+
+    names = {k: i.name for k, i in catalog().items.items()}
+    with _db() as conn:
+        case = conn.execute(
+            """SELECT rc.*, c.name FROM restatement_case rc JOIN company c USING (cik)
+               WHERE rc.id = %s""",
+            (args.case,),
+        ).fetchone()
+        if case is None:
+            print(f"no case {args.case}")
+            return 1
+        rows = conn.execute(
+            """SELECT * FROM case_delta WHERE case_id = %s AND dims = '{}'
+                 AND (%s OR adjustment <> 0) AND (%s OR canonical_item IS NOT NULL)
+               ORDER BY period_end, period_start NULLS FIRST, statement, canonical_item, concept""",
+            (args.case, args.all, args.all),
+        ).fetchall()
+        checks = conn.execute(
+            "SELECT * FROM integrity_check WHERE case_id = %s ORDER BY period_end, name",
+            (args.case,),
+        ).fetchall()
+    sev = "-" if case["severity"] is None else f"{case['severity']:.2f}"
+    print(f"#{case['id']} {case['name']}  {case['status']} {case['type']}  severity {sev}")
+    current = None
+    for r in rows:
+        period = (r["period_start"], r["period_end"])
+        if period != current:
+            current = period
+            label = (
+                f"{r['period_start']} .. {r['period_end']}"
+                if r["period_start"]
+                else f"as of {r['period_end']}"
+            )
+            print(f"\n  {label}")
+        name = names.get(r["canonical_item"]) or r["label"] or r["concept"]
+        ok = {True: "✓", False: "✗", None: " "}[r["check_ok"]]
+        print(
+            f"    {r['statement'] or '?':2} {name[:44]:44} {_money(r['previously_reported']):>18}"
+            f" {_money(r['adjustment']):>16} {_money(r['restated']):>18} {ok} {r['source']}"
+        )
+    if checks:
+        print("\n  integrity checks")
+        for c in checks:
+            when = (
+                f"{c['period_start']}..{c['period_end']}"
+                if c["period_start"]
+                else str(c["period_end"])
+            )
+            assumed = c["details"].get("assumed_unchanged") or []
+            note = f"  (assumed unchanged: {', '.join(assumed)})" if assumed else ""
+            print(
+                f"    {c['status'].upper():4} {c['name']:40} {when:24} gap {_money(c['gap'])}{note}"
+            )
+    return 0
+
+
+def cmd_graph(args: argparse.Namespace) -> int:
+    from radar.normalize.normalize import catalog
+
+    items = catalog().items
+    with _db() as conn:
+        edges = conn.execute(
+            "SELECT * FROM impact_edge WHERE case_id = %s "
+            "ORDER BY period_end, period_start, src_item",
+            (args.case,),
+        ).fetchall()
+    current = None
+    for e in edges:
+        period = (e["period_start"], e["period_end"])
+        if period != current:
+            current = period
+            print(f"\n{e['period_start'] or 'as of'} .. {e['period_end']}")
+        dst = "(implied)" if e["dst_delta"] is None else _money(e["dst_delta"])
+        src = items[e["src_item"]]
+        print(
+            f"  {src.statement} {src.name:28} {_money(e['src_delta']):>16}"
+            f"  --{'+' if e['sign'] > 0 else '-'} {e['relationship']:<26}-->  "
+            f"{items[e['dst_item']].statement} {items[e['dst_item']].name:28} {dst:>16}"
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     p = argparse.ArgumentParser(
@@ -266,6 +407,21 @@ def main(argv: list[str] | None = None) -> int:
     cs.add_argument("--status")
     cs.add_argument("--limit", type=int, default=30)
     cs.set_defaults(func=cmd_cases)
+
+    en = sub.add_parser("enrich", help="compute line-item deltas, checks and impact graphs")
+    en.add_argument("--case", type=int)
+    en.add_argument("--limit", type=int)
+    en.add_argument("--force", action="store_true", help="recompute even if up to date")
+    en.add_argument("--shard", type=int, default=0, help="this worker's shard (0-based)")
+    en.add_argument("--shards", type=int, default=1, help="number of parallel workers")
+    en.set_defaults(func=cmd_enrich)
+    dl = sub.add_parser("deltas", help="show a case's restated line items and checks")
+    dl.add_argument("case", type=int)
+    dl.add_argument("--all", action="store_true", help="include unchanged and unmapped rows")
+    dl.set_defaults(func=cmd_deltas)
+    gr = sub.add_parser("graph", help="show a case's impact graph")
+    gr.add_argument("case", type=int)
+    gr.set_defaults(func=cmd_graph)
 
     args = p.parse_args(argv)
     try:

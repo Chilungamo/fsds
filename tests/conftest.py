@@ -13,3 +13,9 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "live" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def _raw_store_in_tmp(tmp_path, monkeypatch):
+    """Never let tests write downloaded documents into the user's cache."""
+    monkeypatch.setenv("RADAR_RAW_DIR", str(tmp_path / "raw"))

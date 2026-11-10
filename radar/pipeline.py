@@ -21,6 +21,7 @@ from radar.edgar.submissions import SubmissionsCache
 from radar.extract.ixbrl import extract, fmt_decimal
 from radar.models import AMENDMENT_FORMS, NON_RELIANCE_ITEM, WARNING_FORMS, FilingRef
 from radar.parse.item402 import PARSER_VERSION, document_text, parse_item402
+from radar.storage import RawStore
 
 log = logging.getLogger(__name__)
 
@@ -46,10 +47,14 @@ class Pipeline:
         conn: psycopg.Connection,
         edgar: EdgarClient,
         submissions: SubmissionsCache | None = None,
+        store: RawStore | None = None,
+        enrich: bool = True,
     ) -> None:
         self.conn = conn
         self.edgar = edgar
         self.subs = submissions or SubmissionsCache(edgar)
+        self.store = store or RawStore()
+        self.enrich = enrich
 
     # --- queue -----------------------------------------------------------------------
 
@@ -88,8 +93,13 @@ class Pipeline:
         return info.primary_doc
 
     def _download(self, row: dict[str, Any]) -> tuple[str, bytes]:
+        """Primary document, from the raw store when already downloaded."""
         name = self._primary_doc(row)
-        return name, self.edgar.filing_document(row["cik"], row["accession"], name)
+        raw = self.store.get(row["cik"], row["accession"], name)
+        if raw is None:
+            raw = self.edgar.filing_document(row["cik"], row["accession"], name)
+            self.store.put(row["cik"], row["accession"], name, raw)
+        return name, raw
 
     # --- 8-K: Item 4.02 warning ------------------------------------------------------
 
@@ -284,7 +294,28 @@ class Pipeline:
                     "status": status,
                 },
             )
-        return Outcome(acc, row["form"], "DONE", case_id, f"{event} (triage {result.score})")
+        detail = f"{event} (triage {result.score})"
+        if self.enrich:
+            detail += self._enrich(row, raw, case_id)
+        return Outcome(acc, row["form"], "DONE", case_id, detail)
+
+    def _enrich(self, row: dict[str, Any], raw: bytes, case_id: int) -> str:
+        """M2: store line-item deltas and re-analyse the case. Detection has already been
+        recorded, so a failure here is logged on the filing rather than retried."""
+        from radar.enrich import enrich_case, enrich_filing
+
+        try:
+            deltas = enrich_filing(self.conn, self.edgar, row, raw=raw)
+            enrich_case(self.conn, case_id)
+            return f", {deltas.mapped} deltas ({deltas.source or 'none'})"
+        except Exception as exc:
+            log.exception("enrichment of %s failed", row["accession"])
+            self.conn.execute(
+                "UPDATE filing SET meta = meta || jsonb_build_object('enrich_error', %s::text) "
+                "WHERE accession = %s",
+                (f"{type(exc).__name__}: {exc}", row["accession"]),
+            )
+            return ", enrichment failed"
 
 
 def _xbrl_periods(rows) -> list[tuple[str, str]]:
