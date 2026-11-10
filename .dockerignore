@@ -1,0 +1,10 @@
+.git
+**/__pycache__
+*.egg-info
+.pytest_cache
+.ruff_cache
+radar/web/node_modules
+radar/web/dist
+tests
+data
+*.xlsx

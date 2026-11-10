@@ -1,0 +1,29 @@
+# Single-VM production: the base compose file plus HTTPS (Caddy) and daily backups.
+#   docker compose -f docker-compose.yml -f deploy/vm/docker-compose.vm.yml up -d --build
+# Backups rotate by weekday (radar-Mon.dump ... radar-Sun.dump): seven days kept, nothing deleted.
+# Copy ./backups off the machine (e.g. to object storage) to survive losing the VM.
+services:
+  web:
+    ports: !reset []           # only Caddy is exposed
+    environment:
+      RADAR_EMBEDDED_WATCHER: "0"   # the watcher service runs separately here
+  caddy:
+    image: caddy:2
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/vm/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+    depends_on: [web]
+    restart: unless-stopped
+  backup:
+    image: postgres:16
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-radar}
+    volumes: [./backups:/backups]
+    entrypoint: >
+      sh -c 'while true; do pg_dump -h db -U radar -Fc radar > /backups/radar-$$(date +%a).dump;
+             sleep 86400; done'
+    depends_on: [db]
+    restart: unless-stopped
+volumes:
+  caddy:

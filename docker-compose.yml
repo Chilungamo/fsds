@@ -1,0 +1,46 @@
+# Local or single-VM deployment: Postgres, the dashboard and the live watcher.
+#   cp .env.example .env   # set RADAR_SEC_USER_AGENT
+#   docker compose up -d --build
+#   docker compose run --rm web radar backfill 2019-01-01      # optional history
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: radar
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-radar}
+      POSTGRES_DB: radar
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U radar"]
+      interval: 5s
+      retries: 20
+
+  migrate:
+    build: .
+    command: radar migrate
+    environment: &env
+      RADAR_DATABASE_URL: postgresql://radar:${POSTGRES_PASSWORD:-radar}@db:5432/radar
+      RADAR_SEC_USER_AGENT: ${RADAR_SEC_USER_AGENT:?set RADAR_SEC_USER_AGENT in .env}
+    depends_on:
+      db: { condition: service_healthy }
+
+  web:
+    build: .
+    environment: *env
+    ports: ["8000:8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  watcher:
+    build: .
+    command: radar watch --interval 60
+    environment: *env
+    volumes: [raw:/data/raw]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  raw:

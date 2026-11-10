@@ -1,0 +1,78 @@
+# Render Blueprint for Restatement Radar.
+#
+# Render dashboard -> New -> Blueprint -> pick this repository (and branch). Render shows
+# every service and database below, asks for the values marked `sync: false`, and only then
+# creates anything. See docs/DEPLOY.md for costs and the upgrade path.
+#
+# Budget layout (about $13/month + bandwidth): the web service also runs the EDGAR watcher
+# (RADAR_EMBEDDED_WATCHER=1; a Postgres advisory lock keeps it to one copy even when the web
+# service is scaled out), a nightly cron job reconciles against EDGAR's daily index, and one
+# small Postgres database holds everything.
+
+services:
+  - type: web
+    name: restatement-radar
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter            # 0.5 CPU / 512 MB; "standard" (1 CPU / 2 GB) when traffic grows
+    region: oregon
+    healthCheckPath: /api/health
+    preDeployCommand: radar migrate
+    autoDeploy: true
+    envVars:
+      - key: RADAR_DATABASE_URL
+        fromDatabase:
+          name: restatement-radar-db
+          property: connectionString
+      - key: RADAR_SEC_USER_AGENT     # e.g. "RestatementRadar/0.1 you@example.com" (SEC requires a contact)
+        sync: false
+      - key: RADAR_EMBEDDED_WATCHER
+        value: "1"                    # set to "0" once the separate worker below is enabled
+      - key: RADAR_SEC_RATE
+        value: "3"
+      - key: RADAR_DB_POOL
+        value: "8"
+
+  # Nightly: enqueue anything the live watcher missed (EDGAR daily index), Tue-Sat 11:17 UTC.
+  - type: cron
+    name: restatement-radar-reconcile
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    region: oregon
+    schedule: "17 11 * * 2-6"
+    dockerCommand: sh -c "radar reconcile --days 3 && radar process"
+    envVars:
+      - key: RADAR_DATABASE_URL
+        fromDatabase:
+          name: restatement-radar-db
+          property: connectionString
+      - key: RADAR_SEC_USER_AGENT
+        sync: false
+
+  # Growth layout: uncomment, deploy, then set RADAR_EMBEDDED_WATCHER=0 on the web service.
+  # - type: worker
+  #   name: restatement-radar-watcher
+  #   runtime: docker
+  #   dockerfilePath: ./Dockerfile
+  #   dockerContext: .
+  #   plan: starter
+  #   region: oregon
+  #   dockerCommand: radar watch --interval 60
+  #   envVars:
+  #     - key: RADAR_DATABASE_URL
+  #       fromDatabase:
+  #         name: restatement-radar-db
+  #         property: connectionString
+  #     - key: RADAR_SEC_USER_AGENT
+  #       sync: false
+
+databases:
+  - name: restatement-radar-db
+    plan: basic-256mb          # the full 2019-2026 history is ~150 MB; basic-1gb when traffic grows
+    region: oregon
+    postgresMajorVersion: "16"
+    databaseName: radar
+    user: radar

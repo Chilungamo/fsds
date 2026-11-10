@@ -1,0 +1,82 @@
+{
+  "accession": "0001992243-25-000029",
+  "file": "0001992243-25-000029_t1-20250331.htm.gz",
+  "cik": 1992243,
+  "company": "T1 Energy Inc.",
+  "form": "10-Q/A",
+  "period": "Q1 2025 (three months ended 2025-03-31)",
+  "source_url": "https://www.sec.gov/Archives/edgar/data/1992243/000199224325000029/t1-20250331.htm",
+  "html_tables": "Note 1A \u2014 Restatement of Previously Issued Financial Statements",
+  "story": "Amortization of acquired customer-contract intangibles was presented in SG&A instead of as a reduction of revenue. Revenue, gross profit and SG&A each fall by $11.2M; operating loss and net loss are unchanged (pure presentation error).",
+  "root_causes": [
+    "REV"
+  ],
+  "rows": [
+    {
+      "label": "Net sales - related party",
+      "statement": "IS",
+      "concept": "us-gaap:RevenueFromContractWithCustomerIncludingAssessedTax",
+      "period_start": "2025-01-01",
+      "period_end": "2025-03-31",
+      "dims": {},
+      "scale": 1000,
+      "previously_reported": 64647,
+      "adjustment": -11195,
+      "restated": 53452,
+      "expected_check_ok": true
+    },
+    {
+      "label": "Gross profit",
+      "statement": "IS",
+      "concept": "us-gaap:GrossProfit",
+      "period_start": "2025-01-01",
+      "period_end": "2025-03-31",
+      "dims": {},
+      "scale": 1000,
+      "previously_reported": 28976,
+      "adjustment": -11195,
+      "restated": 17781,
+      "expected_check_ok": true
+    },
+    {
+      "label": "Selling, general and administrative",
+      "statement": "IS",
+      "concept": "us-gaap:SellingGeneralAndAdministrativeExpense",
+      "period_start": "2025-01-01",
+      "period_end": "2025-03-31",
+      "dims": {},
+      "scale": 1000,
+      "previously_reported": 52587,
+      "adjustment": -11195,
+      "restated": 41392,
+      "expected_check_ok": true
+    },
+    {
+      "label": "Loss from continuing operations",
+      "statement": "IS",
+      "concept": "us-gaap:OperatingIncomeLoss",
+      "period_start": "2025-01-01",
+      "period_end": "2025-03-31",
+      "dims": {},
+      "scale": 1000,
+      "previously_reported": -23611,
+      "adjustment": 0,
+      "restated": -23611,
+      "expected_check_ok": true
+    },
+    {
+      "label": "Net loss",
+      "statement": "IS",
+      "concept": "us-gaap:ProfitLoss",
+      "period_start": "2025-01-01",
+      "period_end": "2025-03-31",
+      "dims": {},
+      "scale": 1000,
+      "previously_reported": -16239,
+      "adjustment": 0,
+      "restated": -16239,
+      "expected_check_ok": true
+    }
+  ],
+  "note": "Values are copied by hand from the HTML restatement tables of the filing (as printed, before multiplying by `scale`), independently of the XBRL tagging."
+}

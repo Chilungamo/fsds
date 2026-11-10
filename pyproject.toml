@@ -1,0 +1,46 @@
+[project]
+name = "restatement-radar"
+version = "0.1.0"
+description = "Detect, extract and explain SEC financial restatements (fsds)"
+readme = "radar/README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.28,<1.0",
+  "lxml>=5.0",
+  "psycopg[binary]>=3.2,<4",
+  "psycopg-pool>=3.2,<4",
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.32,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0,<9.0", "ruff>=0.9,<1.0"]
+
+[project.scripts]
+radar = "radar.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["radar*"]
+
+[tool.setuptools.package-data]
+radar = ["db/migrations/*.sql", "normalize/*.toml", "web/dist/*", "web/dist/assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["live: hits SEC EDGAR over the network (opt in with -m live)"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+include = ["radar/**/*.py", "tests/**/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]  # inline iXBRL snippets are clearer unwrapped
