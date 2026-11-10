@@ -6,7 +6,7 @@ Backend for a real-time dashboard of SEC financial restatements (see the living 
 | Milestone | Scope | Status |
 |---|---|---|
 | M0 | EDGAR client, iXBRL restatement extractor, golden fixtures | done — 46/46 hand-checked line items match |
-| M1 | Live detection: feed watcher, Item 4.02 parser, amendment triage, Postgres schema, reconciliation, backfill | done — see [M1](#m1--detection) |
+| M1 | Live detection: feed watcher, Item 4.02 parser, amendment triage, Postgres schema, reconciliation, backfill | done — 100% recall (14/14) over 30 days; 1,998 cases since 2019 |
 
 ## What's here
 
@@ -192,8 +192,13 @@ The database tests need a Postgres database they may wipe (default
    temporary-equity restatements. Those 8-Ks declare *balance sheets* "as of" an IPO date
    unreliable, so "as of" is an anchor when it follows "balance sheet". This raised
    period coverage from 84.5% to 92.2% of all Item 4.02 8-Ks (2021: 77% → 93%).
-5. Many Big R restatements are corrected in the next *regular* 10-K or 10-Q, not in a
-   10-K/A or 10-Q/A: of 206 Item 4.02 cases from 2025–26, 68 have a linked amendment.
-   Triaging the regular reports that follow a warning is the next detection step.
+5. Full-text search misses many restatement amendments. In a sample of 15 unlinked 2025
+   cases, 7 had a 10-K/A or 10-Q/A on EDGAR that search never returned. Processing a
+   warning therefore queues the company's own amendments from its submissions record and
+   re-triages any it ignored before the case existed. This raised confirmed cases from 92
+   to 1,073 (of 1,998). Confirmations are backed by XBRL restatement tags (1,344
+   amendments) or an explanatory note stating the restatement (370 more). The remaining
+   unlinked warnings are mostly restatements corrected in the next *regular* 10-K/10-Q
+   (7 of the 15 sampled), which a later milestone has to triage.
 6. EDGAR answers both throttling and a missing Archives file (e.g. a weekend daily index)
    with HTTP 403; only throttling (identified by its message) is retried.
