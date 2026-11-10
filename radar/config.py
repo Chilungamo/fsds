@@ -36,4 +36,9 @@ DEFAULT_DATABASE_URL = "postgresql://radar:radar@localhost:5432/radar"
 
 
 def database_url() -> str:
-    return os.environ.get("RADAR_DATABASE_URL", DEFAULT_DATABASE_URL)
+    """RADAR_DATABASE_URL, else DATABASE_URL (set by Fly, Heroku-style hosts), else local."""
+    return (
+        os.environ.get("RADAR_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+        or DEFAULT_DATABASE_URL
+    )

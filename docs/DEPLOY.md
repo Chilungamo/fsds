@@ -98,17 +98,120 @@ uncomment the worker and set `RADAR_EMBEDDED_WATCHER` to `0`, then push.
 
 ## Deploying on Fly.io
 
+Fly runs the same Docker image on its own machines; `fly.toml` in the repository already
+describes the app (one always-on 512 MB machine in `iad`, health check, `radar migrate` as
+the release step, the watcher embedded in the web process). The command names below are
+current as far as I know but could not be checked against Fly's documentation from the
+build environment; `fly <command> --help` is authoritative.
+
+**1. Install the CLI and sign in** (Fly asks for a payment card before the first deploy).
+
+```bash
+curl -L https://fly.io/install.sh | sh
+```
+
+```bash
+fly auth login
+```
+
+**2. Create the app from `fly.toml`** without deploying yet. Pick a globally unique name if
+`restatement-radar` is taken (Fly updates `app =` in the file).
+
 ```bash
 fly launch --no-deploy --copy-config
 ```
 
+If it offers to create a Postgres database or a Redis instance, say no: the database is
+chosen in step 3, and Redis is not used.
+
+**3. Choose the database** — the biggest line on a small Fly bill.
+
+* *Fly Managed Postgres* (~$38/month for the smallest plan): create a cluster in the same
+  region and attach it to the app, which stores the connection string as the `DATABASE_URL`
+  secret (the app reads it).
+
+  ```bash
+  fly mpg create
+  ```
+
+  ```bash
+  fly mpg attach
+  ```
+
+* *An external Postgres* (e.g. Neon or Supabase; their free tiers fit the 152 MB database):
+  create a Postgres 16 database there, then store its connection string:
+
+  ```bash
+  fly secrets set RADAR_DATABASE_URL="postgresql://USER:PASSWORD@HOST/DB?sslmode=require"
+  ```
+
+**4. Set the SEC contact** (required by EDGAR):
+
 ```bash
-fly secrets set RADAR_SEC_USER_AGENT="RestatementRadar/0.1 you@example.com" RADAR_DATABASE_URL="postgresql://..."
+fly secrets set RADAR_SEC_USER_AGENT="RestatementRadar/0.1 you@example.com"
 ```
+
+**5. Deploy.** Fly builds the image, runs `radar migrate` in a temporary machine, then starts
+the app at `https://<app-name>.fly.dev`.
 
 ```bash
 fly deploy
 ```
+
+Fly may start two machines for redundancy on the first deploy. The Postgres advisory lock
+keeps the embedded watcher to one copy either way; to keep the bill at one machine:
+
+```bash
+fly scale count 1
+```
+
+**6. Load the history** from the dump (minutes):
+
+* external database: run `pg_restore` against its connection string, as in the Render
+  section;
+* Fly Managed Postgres: open a local tunnel to the cluster in one terminal, then restore
+  through it in another (the proxy command prints the local port and credentials to use):
+
+  ```bash
+  fly mpg proxy
+  ```
+
+  ```bash
+  pg_restore --clean --if-exists --no-owner -d "postgresql://USER:PASSWORD@localhost:PORT/DB" radar-2026-11-10.dump
+  ```
+
+Or rebuild from EDGAR inside the app (about an hour):
+
+```bash
+fly ssh console -C "sh -c 'radar backfill 2019-01-01 && radar process && radar enrich && radar tickers'"
+```
+
+**7. Nightly reconciliation (optional but recommended).** Fly has no cron section in
+`fly.toml`; a scheduled machine running the app's image does the same job:
+
+```bash
+fly machine run registry.fly.io/<app-name>:latest --schedule daily --region iad --vm-memory 512 -- radar reconcile --days 3
+```
+
+Scheduled machines inherit the app's secrets. Check `fly machine run --help` for the exact
+flags in your CLI version.
+
+**8. Custom domain (optional).** Point a CNAME at `<app-name>.fly.dev`, then:
+
+```bash
+fly certs add radar.example.com
+```
+
+**Operating it**
+
+| Task | Command |
+|---|---|
+| Live logs | `fly logs` |
+| Status and machines | `fly status` |
+| Shell inside the app | `fly ssh console` |
+| More memory | `fly scale memory 1024` |
+| More machines | `fly scale count 2` |
+| Separate watcher | add `[processes]` with `web` and `watcher` entries, set `RADAR_EMBEDDED_WATCHER = "0"` |
 
 ## Deploying on a VM
 
@@ -127,7 +230,7 @@ docker compose -f docker-compose.yml -f deploy/vm/docker-compose.vm.yml up -d --
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `RADAR_DATABASE_URL` | local | Postgres connection string |
+| `RADAR_DATABASE_URL` | `DATABASE_URL`, else local | Postgres connection string |
 | `RADAR_SEC_USER_AGENT` | — (required) | application name + contact email for SEC EDGAR |
 | `RADAR_EMBEDDED_WATCHER` | `0` | `1`: the web process polls EDGAR (one instance wins a Postgres advisory lock) |
 | `RADAR_SEC_RATE` | `5` | EDGAR requests per second per process (SEC maximum 10 across everything) |
