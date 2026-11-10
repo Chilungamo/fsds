@@ -88,10 +88,11 @@ confirmed.
      ```bash
      pg_restore --clean --if-exists --no-owner -d "EXTERNAL_DATABASE_URL" radar-2026-11-10.dump
      ```
-   * or **rebuild from EDGAR** (about an hour, from the web service's Shell tab):
-     ```bash
-     radar backfill 2019-01-01 && radar process && radar enrich && radar tickers
-     ```
+   * or **rebuild from EDGAR** (a few hours) with Render one-off jobs (web service →
+     Jobs, or `POST /v1/services/{id}/jobs`). Render runs a job's start command without a
+     shell, so start one job per command, each after the previous one finishes:
+     `radar backfill 2019-01-01 2024-12-31`, `radar backfill 2025-01-01 --amendments`,
+     `radar reconcile --days 30`, `radar process`, `radar enrich`, `radar tickers`.
 
 To grow: change `plan:` values in `render.yaml` (web `standard`, database `basic-1gb`),
 uncomment the worker and set `RADAR_EMBEDDED_WATCHER` to `0`, then push.

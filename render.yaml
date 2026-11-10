@@ -43,7 +43,8 @@ services:
     plan: starter
     region: oregon
     schedule: "17 11 * * 2-6"
-    dockerCommand: sh -c "radar reconcile --days 3 && radar process"
+    # one command, no shell syntax: Render passes quoted shell lines to sh as a single word
+    dockerCommand: radar nightly --days 3
     envVars:
       - key: RADAR_DATABASE_URL
         fromDatabase:
