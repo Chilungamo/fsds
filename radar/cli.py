@@ -1,6 +1,8 @@
 """Command line entry point: ``radar <command>`` (or ``python -m radar``).
 
 M0  fetch, extract          download a filing / print its restatement table
+M3  serve                   dashboard: REST API, live event stream, web app
+    tickers                 refresh ticker symbols
 M2  enrich                  line-item deltas, integrity checks, impact graph, severity
     deltas CASE / graph CASE show a case's restatement and how it propagates
 M1  migrate                 create or upgrade the database schema
@@ -357,6 +359,23 @@ def cmd_graph(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tickers(args: argparse.Namespace) -> int:
+    from radar.edgar.tickers import refresh_tickers
+
+    with _db() as conn, EdgarClient() as edgar:
+        print(f"updated tickers for {refresh_tickers(conn, edgar)} companies")
+    return 0
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    from radar.api.app import create_app
+
+    uvicorn.run(create_app(), host=args.host, port=args.port, log_level="info")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     p = argparse.ArgumentParser(
@@ -425,6 +444,14 @@ def main(argv: list[str] | None = None) -> int:
     gr = sub.add_parser("graph", help="show a case's impact graph")
     gr.add_argument("case", type=int)
     gr.set_defaults(func=cmd_graph)
+
+    sub.add_parser("tickers", help="refresh ticker symbols from the SEC").set_defaults(
+        func=cmd_tickers
+    )
+    sv = sub.add_parser("serve", help="run the dashboard (API + web app)")
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8000)
+    sv.set_defaults(func=cmd_serve)
 
     args = p.parse_args(argv)
     try:

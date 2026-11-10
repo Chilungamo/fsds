@@ -8,6 +8,7 @@ Backend for a real-time dashboard of SEC financial restatements (see the living 
 | M0 | EDGAR client, iXBRL restatement extractor, golden fixtures | done — 46/46 hand-checked line items match |
 | M1 | Live detection: feed watcher, Item 4.02 parser, amendment triage, Postgres schema, reconciliation, backfill | done — 100% recall (14/14) over 30 days; 1,998 cases since 2019 |
 | M2 | Line-item deltas (XBRL, HTML tables, companyfacts), normaliser, propagation engine, integrity checks, severity | done — deltas for 97.1% of confirmed cases (target 80%); 89.9% of 5,070 checks pass |
+| M3 | Dashboard: REST API, live event stream, web app (feed, case pages, net income bridge, impact graph), packaging | built and tested; detection latency p95 100 s (first 25 filings); public deployment needs a hosting account |
 
 ## What's here
 
@@ -273,3 +274,89 @@ radar graph 167
    105 such filings.
 7. **Never guess a number.** A column band holding two numbers once produced values like
    $5.5 × 10²⁰; ambiguous cells now yield nothing.
+
+---
+
+# M3 — Dashboard
+
+![Case page](../docs/screenshots/dashboard-overview.png)
+
+```
+pipeline ── INSERT event_log + NOTIFY radar_events
+                    │
+        radar.api.stream.Broadcaster (one LISTEN per process)
+                    │  fan-out to every browser
+FastAPI ── /api/stream (Server-Sent Events, Last-Event-ID replay)
+        ── /api/cases, /api/cases/{id}[/deltas|/graph|/checks], /api/companies/{cik}, /api/stats
+        ── / (the React app in radar/web/dist, same process)
+```
+
+| Part | Purpose |
+|---|---|
+| `radar/api/app.py` | FastAPI app: REST endpoints, SSE endpoint, serves the built web app |
+| `radar/api/queries.py` | Read-side SQL returning JSON-ready dicts |
+| `radar/api/stream.py` | Broadcaster (one Postgres LISTEN per process) and the per-client stream with replay |
+| `radar/web/` | Vite + React + TypeScript; React Flow (impact graph), Recharts (bridge, stats) |
+| `Dockerfile`, `docker-compose.yml` | One image for dashboard and workers; compose runs Postgres, migrations, dashboard, watcher |
+
+## Running it
+
+```bash
+cd radar/web && npm ci && npm run build && cd ../..
+```
+
+```bash
+radar serve --port 8000
+```
+
+```bash
+radar watch
+```
+
+For development, `npm run dev` in `radar/web` proxies `/api` to `radar serve`.
+
+## The page
+
+* **Feed:** every case, newest activity first or most severe first; filters for pending,
+  restated and needs-review; search by company, ticker or CIK. New alerts slide in live and
+  are announced to screen readers.
+* **Case:** a plain-language summary, headline changes (net income, equity, assets, cash
+  flow), the filing timeline with links to EDGAR, and what the company said.
+* **Per period:** a net income bridge (as reported → each restated line → as restated),
+  the accounting checks, the line-item table, and the impact graph across the three
+  statements. Reported effects are solid; effects implied by accounting links are dashed.
+* **Accessible by construction:** every change carries ▲/▼ and a sign, statuses an icon
+  and label; light and dark themes; works from 360 px wide.
+
+## Tests
+
+`tests/test_api.py` runs the API against Postgres seeded through the real pipeline,
+including an end-to-end browser test (`tests/e2e_live.cjs`, Node Playwright): the page
+is opened, a new Item 4.02 filing is pushed through the pipeline, and the card must arrive
+over the live stream without a reload.
+
+## Results
+
+| Measure | Result |
+|---|---|
+| Detection latency, EDGAR acceptance → in the pipeline | p50 64 s, p95 100 s (first 25 filings after the watcher started, 10 Nov 2026 evening; target < 5 min). Feed timestamps match EDGAR's acceptance times exactly |
+| Event → browser | about 10 ms from NOTIFY to the SSE client in the stream test |
+| Packaging | a regular (non-editable) install serves the API and the web app with all data files |
+
+## Findings
+
+1. **One listener per process, not per browser.** A first version queried event rows on
+   the connection that was inside `notifies()`; psycopg holds that connection, so the
+   stream deadlocked silently (only the replay worked). The Broadcaster keeps a dedicated
+   listening connection and fans out through asyncio queues.
+2. **Streams end on purpose.** Each SSE response closes after 5 minutes; EventSource
+   reconnects with Last-Event-ID and the replay fills the gap. Subscribing before
+   replaying, and skipping ids already sent, means nothing is lost or duplicated.
+3. **Grid children need `minmax(0, 1fr)`.** Without it, the case page overflowed on phones.
+
+## Not done here
+
+* **Public deployment.** It needs your hosting account (e.g. Fly.io, Render, a VM). The
+  image and compose file are ready.
+* **Container build.** It could not be verified in this sandbox: Docker Hub answered 429
+  (rate limit) for the base images.

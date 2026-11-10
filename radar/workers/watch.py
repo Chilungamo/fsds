@@ -60,6 +60,11 @@ def run(
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     pipeline = Pipeline(conn, edgar)
+    # latency is only meaningful for filings accepted while the watcher is running;
+    # anything earlier is a catch-up backlog
+    from datetime import UTC, datetime
+
+    repo.set_cursor(conn, "watch:started", datetime.now(UTC).isoformat())
     while True:
         started = time.monotonic()
         try:
