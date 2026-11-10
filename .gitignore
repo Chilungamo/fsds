@@ -7,3 +7,5 @@ edgar-env/
 data/
 radar/web/node_modules/
 radar/web/dist/
+build/
+*.tsbuildinfo
