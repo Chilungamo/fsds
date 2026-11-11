@@ -108,6 +108,7 @@ def test_graph_and_checks(client):
 def test_stats_and_company(client):
     s = client.get("/api/stats").json()
     assert s["cases"] == {"CONFIRMED": 1, "PENDING": 1}
+    assert s["delta_coverage"] == {"confirmed": 1, "with_deltas": 1}
     assert {"year": 2026, "n": 1} in s["warnings_by_year"]
     assert s["median_days_warning_to_amendment"] == 0
     c = client.get("/api/companies/1308208").json()

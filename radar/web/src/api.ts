@@ -111,6 +111,8 @@ export interface Check {
 
 export interface Stats {
   detection_latency: { n: number; p50_seconds: number | null; p95_seconds: number | null };
+  /** Restated cases, and how many of them have line-item deltas extracted. */
+  delta_coverage: { confirmed: number; with_deltas: number };
   cases: Partial<Record<Status, number>>;
   warnings: { last_30: number; last_90: number; last_365: number };
   warnings_by_year: { year: number; n: number }[];

@@ -269,9 +269,18 @@ def get_stats(conn: psycopg.Connection) -> dict[str, Any]:
                    AND f.accepted_at >= jc.value::timestamptz
                    AND f.accepted_at > now() - interval '7 days') t"""
     ).fetchone()
+    delta_coverage = conn.execute(
+        """SELECT count(*) AS confirmed,
+                  count(*) FILTER (WHERE EXISTS (
+                      SELECT 1 FROM case_filing cf
+                      JOIN fact_delta fd ON fd.accession = cf.accession
+                      WHERE cf.case_id = rc.id)) AS with_deltas
+           FROM restatement_case rc WHERE rc.status IN ('CONFIRMED', 'ENRICHED')"""
+    ).fetchone()
     return jsonable(
         {
             "detection_latency": latency,
+            "delta_coverage": delta_coverage,
             "cases": {r["status"]: r["n"] for r in by_status},
             "warnings": warnings,
             "warnings_by_year": by_year,
