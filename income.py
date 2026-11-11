@@ -46,8 +46,9 @@ engine = create_engine(db_url)
 existing_keys = set()
 try:
     with engine.connect() as conn:
-        result = conn.execute(text("SELECT cik, accession, start, end FROM revenues2"))
-        existing_keys = set((str(r[0]), str(r[1]), str(r[2])) for r in result.fetchall())
+        # "end" is a reserved word in PostgreSQL, so both date columns are quoted.
+        result = conn.execute(text('SELECT cik, accession, "start", "end" FROM income2'))
+        existing_keys = set((str(r[0]), str(r[1]), str(r[2]), str(r[3])) for r in result.fetchall())
     logging.info(f"📌 Found {len(existing_keys)} existing entries to skip.")
 except Exception:
     logging.warning("⚠️ Table not found or first run. All data will be collected.")
@@ -66,9 +67,9 @@ for _, row in companies.iterrows():
             entries = resp.json().get("units", {}).get("USD", [])
             for e in entries:
                 accn = e.get("accn")
-                start = e.get("end")
-                end =e.get("end")
-                key = (cik, accn, start,end)
+                start = e.get("start")
+                end = e.get("end")
+                key = (cik, str(accn), str(start), str(end))
                 if key in existing_keys:
                     continue  # Skip duplicate
                 try:
