@@ -1,8 +1,8 @@
-# Fly.io alternative to render.yaml (see docs/DEPLOY.md).
-#   fly launch --no-deploy --copy-config      # creates the app from this file
-#   fly secrets set RADAR_SEC_USER_AGENT="RestatementRadar/0.1 you@example.com" \
-#                   RADAR_DATABASE_URL="postgresql://..."     # Fly Managed Postgres or an external one
-#   fly deploy
+# Fly.io deployment (full walk-through: docs/DEPLOY.md, "Deploying on Fly.io").
+#   fly launch --no-deploy --copy-config
+#   fly mpg create && fly mpg attach        # or: fly secrets set RADAR_DATABASE_URL=...
+#   fly secrets set RADAR_SEC_USER_AGENT="RestatementRadar/0.1 you@example.com"
+#   fly deploy && fly scale count 1
 app = "restatement-radar"
 primary_region = "iad"
 

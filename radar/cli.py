@@ -9,6 +9,7 @@ M1  migrate                 create or upgrade the database schema
     watch [--once]          poll EDGAR's live feed and process new filings
     process                 drain the work queue
     reconcile START [END]   enqueue filings the watcher missed, from daily indexes
+    nightly [--days N]      scheduled job: reconcile the last N days, then process
     backfill START [END]    historical Item 4.02 8-Ks (and --amendments) via full-text search
     recall START [END]      detection recall vs full-text search
     cases                   list restatement cases
@@ -163,6 +164,15 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
                     flush=True,
                 )
     return 0
+
+
+def cmd_nightly(args: argparse.Namespace) -> int:
+    """Scheduled job in one command (hosts like Render run a command, not a shell line):
+    reconcile the last few days against EDGAR's daily index, then drain the queue."""
+    args.start, args.end = None, None
+    rc = cmd_reconcile(args)
+    args.limit = None
+    return rc or cmd_process(args)
 
 
 def cmd_backfill(args: argparse.Namespace) -> int:
@@ -450,6 +460,9 @@ def main(argv: list[str] | None = None) -> int:
     gr.add_argument("case", type=int)
     gr.set_defaults(func=cmd_graph)
 
+    ni = sub.add_parser("nightly", help="scheduled job: reconcile recent days, then process")
+    ni.add_argument("--days", type=int, default=3)
+    ni.set_defaults(func=cmd_nightly)
     sub.add_parser("tickers", help="refresh ticker symbols from the SEC").set_defaults(
         func=cmd_tickers
     )
