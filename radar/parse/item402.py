@@ -36,9 +36,11 @@ _TOKEN = re.compile(rf"(?P<md>{_MONTH_DAY})|(?P<year>{_YEAR})", re.I)
 _NON_RELIANCE_SENTENCE = re.compile(r"relied upon|relied on\b|should be restated", re.I)
 _SENTENCE_SPLIT = re.compile(r"(?<!\bInc)(?<!\bCorp)(?<!\bCo)(?<!\bLtd)(?<!\bNo)\.\s+(?=[A-Z])")
 _HEADING = re.compile(r"Item\s*4\.02\.?\s*(?=Non[-\s]?Reliance)", re.I)
+# The next item's heading ends the section. "Item 4.02" itself never does: filers refer
+# back to it mid-section ("... the matters disclosed pursuant to this Item 4.02.").
 _NEXT_HEADING = re.compile(
-    r"Item\s*\d\.\d{2}\.?\s*(?=[A-Z][a-z])|SIGNATURES?\b|Pursuant to the requirements of the "
-    r"Securities Exchange Act"
+    r"Item\s*(?!4\.02)\d\.\d{2}\.?\s*(?=[A-Z][a-z])|SIGNATURES?\b"
+    r"|Pursuant to the requirements of the Securities Exchange Act"
 )
 _MONEY = re.compile(
     r"\$\s?(?P<num>\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*(?P<unit>thousand|million|billion)?",
