@@ -1,9 +1,16 @@
 import resource
+import sys
 
 import httpx
 
 from radar.edgar.client import EdgarClient
 from radar.edgar.submissions import SubmissionsCache
+
+
+def peak_rss_mb() -> float:
+    """Peak memory of this process in MB. ru_maxrss is kilobytes on Linux, bytes on macOS."""
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return rss / (1024 * 1024) if sys.platform == "darwin" else rss / 1024
 
 
 def big_company(n=1000):
@@ -54,10 +61,10 @@ def test_memory_stays_flat_across_many_companies():
     cache = SubmissionsCache(client([]))
     for cik in range(200):  # warm up to the cap
         cache.company(cik)
-    before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    before = peak_rss_mb()
     for cik in range(200, 2200):
         cache.company(cik)
-    grown_mb = (resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before) / 1024
+    grown_mb = peak_rss_mb() - before
     assert len(cache) == 128
     assert grown_mb < 40, f"peak memory grew {grown_mb:.0f} MB"
 
