@@ -15,6 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0,<9.0", "ruff>=0.9,<1.0"]
+llm = ["anthropic>=2.8,<3"]
 
 [project.scripts]
 radar = "radar.cli:main"
@@ -28,7 +29,10 @@ radar = ["db/migrations/*.sql", "normalize/*.toml", "web/dist/*", "web/dist/asse
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-markers = ["live: hits SEC EDGAR over the network (opt in with -m live)"]
+markers = [
+  "live: hits SEC EDGAR over the network (opt in with -m live)",
+  "llm: calls the Anthropic API, costs money (opt in with -m llm)",
+]
 
 [tool.ruff]
 line-length = 100
