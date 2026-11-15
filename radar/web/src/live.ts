@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RadarEvent } from "./api";
 
-const EVENT_TYPES = ["case.created", "case.updated", "case.confirmed", "case.enriched"];
+const EVENT_TYPES = ["case.created", "case.updated", "case.confirmed", "case.enriched", "case.explained"];
 
 /**
  * Subscribe to /api/stream (Server-Sent Events). The browser reconnects on its own and

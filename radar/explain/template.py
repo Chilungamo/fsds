@@ -40,6 +40,8 @@ class CaseFacts:
     sub_item: str | None = None  # 'a' company concluded, 'b' auditor notified
     case_type: str = "UNKNOWN"  # BIG_R | LITTLE_R | UNKNOWN
     period_ends: list[str] = field(default_factory=list)  # ISO dates named in the notice
+    amendment_form: str | None = None  # first restating amendment, for cases with no 8-K
+    amendment_date: str | None = None
 
 
 @dataclass
@@ -61,6 +63,8 @@ class Explanation:
     facts: list[Fact]
     causes: list[Cause]
     method: str = "template"
+    known_dates: set[str] = field(default_factory=set)  # ISO dates the text may mention
+    names: set[str] = field(default_factory=set)  # names whose digits are not figures
 
     @property
     def text(self) -> str:
@@ -222,8 +226,18 @@ def _walk(prev: dict[str, str | None], node: str) -> list[str]:
 # --- sentences -----------------------------------------------------------------------------
 
 
+FORM_NAMES = {"10-K/A": "annual report", "10-Q/A": "quarterly report"}
+
+
 def _notice(case: CaseFacts) -> str:
     who = case.company
+    if case.warning_date is None and case.amendment_form:
+        kind = FORM_NAMES.get(case.amendment_form, "report")
+        when = f" on {long_date(case.amendment_date)}" if case.amendment_date else ""
+        return (
+            f"{who} filed an amended {kind} ({case.amendment_form}){when} that changes figures "
+            "it had previously reported."
+        )
     when = f" on {long_date(case.warning_date)}" if case.warning_date else ""
     ends = sorted(set(case.period_ends))
     if not ends:
@@ -425,4 +439,13 @@ def explain(case: CaseFacts, causes: list[Cause], view: View, edges: list[Edge])
             sentences.append(cash)
         if path := _path_sentence(flow_path(view, edges, p)):
             sentences.append(path)
-    return Explanation(_headline(case, causes, lead, w), sentences, w.facts, causes)
+    known = {d for d in [case.warning_date, case.amendment_date, *case.period_ends] if d}
+    known |= {d for p in view for d in (p.start, p.end) if d}
+    return Explanation(
+        _headline(case, causes, lead, w),
+        sentences,
+        w.facts,
+        causes,
+        known_dates=known,
+        names={case.company},
+    )

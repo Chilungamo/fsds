@@ -96,6 +96,7 @@ export function Feed(p: Props) {
                   {c.sub_item === "b" && <span className="chip" title="Auditor-initiated (Item 4.02(b))">auditor</span>}
                   <Severity value={c.severity} />
                 </div>
+                {c.explanation_headline && <div className="card-explain">{c.explanation_headline}</div>}
                 {h && (
                   <div className="card-row">
                     <span className="secondary">{ITEM_NAME[h.item] ?? h.item}</span>

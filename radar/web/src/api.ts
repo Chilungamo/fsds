@@ -29,6 +29,36 @@ export interface CaseSummary {
   last_filed: string | null;
   forms: string[] | null;
   periods: string[] | null;
+  explanation_headline?: string | null;
+}
+
+export interface ExplanationFact {
+  shown: string;
+  value: string;
+  item: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  field: "previously_reported" | "adjustment" | "restated" | "pct_change";
+}
+
+export interface ExplanationCause {
+  code: string;
+  label: string;
+  score: number;
+  confidence: number;
+  evidence: string[];
+  from_items: string[];
+}
+
+export interface Explanation {
+  method: "template" | "llm";
+  headline: string;
+  sentences: string[];
+  facts: ExplanationFact[];
+  causes: ExplanationCause[];
+  validation: { figures_checked: number; facts_checked: number; dates_checked: number };
+  model: string | null;
+  updated_at: string;
 }
 
 export interface Filing {
@@ -48,6 +78,7 @@ export interface CaseDetail extends CaseSummary {
   filings: Filing[];
   affected_periods: { period_end: string; kinds: string[]; sources: string[] }[];
   summary: Record<string, unknown>;
+  explanation: Explanation | null;
 }
 
 export interface DeltaRow {

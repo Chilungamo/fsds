@@ -33,6 +33,11 @@ services:
         value: "3"
       - key: RADAR_DB_POOL
         value: "8"
+      # M4: Claude rewrites each case's explanation (validated; template shown otherwise)
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RADAR_LLM
+        value: "1"
 
   # Nightly: enqueue anything the live watcher missed (EDGAR daily index), Tue-Sat 11:17 UTC.
   - type: cron
@@ -52,6 +57,10 @@ services:
           property: connectionString
       - key: RADAR_SEC_USER_AGENT
         sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RADAR_LLM
+        value: "1"
 
   # Growth layout: uncomment, deploy, then set RADAR_EMBEDDED_WATCHER=0 on the web service.
   # - type: worker

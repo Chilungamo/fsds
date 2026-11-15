@@ -20,7 +20,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from radar.explain.template import Explanation
-from radar.explain.validate import Validation, figures, matches, validate
+from radar.explain.validate import Validation, dates, figures, matches, validate
 from radar.propagate.engine import View
 
 log = logging.getLogger(__name__)
@@ -142,12 +142,20 @@ def narrate(
     headline = (data.get("headline") or "").strip()
     if not headline or not sentences:
         return NarrativeResult(e, False, "empty response", usage=usage)
-    candidate = replace(e, headline=headline, sentences=sentences, method="llm")
+    # dates the company itself gives (e.g. when its audit committee concluded) may be used
+    own_dates = {iso for _shown, iso in dates(company_text) if iso}
+    candidate = replace(
+        e,
+        headline=headline,
+        sentences=sentences,
+        method="llm",
+        known_dates=e.known_dates | own_dates,
+    )
     v = validate(candidate, view)
     if not v.ok:
         log.info("narrative rejected: %s", [p.detail for p in v.problems])
         return NarrativeResult(e, False, "failed validation", v, usage)
     # keep only the facts the narrative actually shows, so each figure links to its source
-    shown = figures(" ".join([headline, *sentences]))
+    shown = figures(" ".join([headline, *sentences]), e.names)
     candidate.facts = [f for f in e.facts if any(matches(fig, f) for fig in shown)]
     return NarrativeResult(candidate, True, "ok", v, usage)

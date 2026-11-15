@@ -49,12 +49,14 @@ class Pipeline:
         submissions: SubmissionsCache | None = None,
         store: RawStore | None = None,
         enrich: bool = True,
+        explain: bool = True,
     ) -> None:
         self.conn = conn
         self.edgar = edgar
         self.subs = submissions or SubmissionsCache(edgar)
         self.store = store or RawStore()
         self.enrich = enrich
+        self.explain = explain
 
     # --- queue -----------------------------------------------------------------------
 
@@ -167,6 +169,7 @@ class Pipeline:
                 {"form": row["form"], "role": role, "company": row.get("company"), **summary},
             )
         queued = self._queue_followups(row)
+        self._explain(case_id)
         return Outcome(
             acc,
             row["form"],
@@ -297,7 +300,19 @@ class Pipeline:
         detail = f"{event} (triage {result.score})"
         if self.enrich:
             detail += self._enrich(row, raw, case_id)
+        self._explain(case_id)
         return Outcome(acc, row["form"], "DONE", case_id, detail)
+
+    def _explain(self, case_id: int) -> None:
+        """M4: (re)write the case's plain-English explanation. Never fails the filing."""
+        if not self.explain:
+            return
+        from radar.explain.service import explain_case
+
+        try:
+            explain_case(self.conn, case_id)
+        except Exception:
+            log.exception("explanation of case %s failed", case_id)
 
     def _enrich(self, row: dict[str, Any], raw: bytes, case_id: int) -> str:
         """M2: store line-item deltas and re-analyse the case. Detection has already been

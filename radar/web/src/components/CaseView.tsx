@@ -3,6 +3,7 @@ import { api, type CaseDetail, type Check, type DeltaPeriod, type Graph } from "
 import { dateLabel, delta, direction, ITEM_NAME, money, pct, ROLE_LABEL } from "../format";
 import { Checks } from "./Checks";
 import { DeltaTable } from "./DeltaTable";
+import { ExplanationPanel } from "./ExplanationPanel";
 import { Severity, StatusBadge } from "./Feed";
 import { ImpactGraph } from "./ImpactGraph";
 import { Waterfall } from "./Waterfall";
@@ -133,7 +134,7 @@ export function CaseView({ id }: { id: number }) {
             Company on EDGAR ↗
           </a>
         </div>
-        <Summary c={c} periods={periods} />
+        {c.explanation ? <ExplanationPanel e={c.explanation} /> : <Summary c={c} periods={periods} />}
         {c.headline && c.headline.length > 0 && (
           <div className="kpis">
             {c.headline.map((h) => {

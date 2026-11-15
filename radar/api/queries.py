@@ -43,6 +43,7 @@ _CASE_COLUMNS = """
     rc.summary->'deltas'->'headline' AS headline,
     (rc.summary->'deltas'->>'checks_passed')::int AS checks_passed,
     (rc.summary->'deltas'->>'checks_failed')::int AS checks_failed,
+    (SELECT e.headline FROM case_explanation e WHERE e.case_id = rc.id) AS explanation_headline,
     fd.first_filed, fd.last_filed, fd.forms,
     (SELECT array_agg(DISTINCT ap.period_end ORDER BY ap.period_end)
        FROM affected_period ap WHERE ap.case_id = rc.id) AS periods
@@ -119,9 +120,20 @@ def get_case(conn: psycopg.Connection, case_id: int) -> dict[str, Any] | None:
         (case_id,),
     ).fetchall()
     out = jsonable(case)
+    out["explanation"] = get_explanation(conn, case_id)
     out["filings"] = jsonable(filings)
     out["affected_periods"] = jsonable(periods)
     return out
+
+
+def get_explanation(conn: psycopg.Connection, case_id: int) -> dict[str, Any] | None:
+    """The validated explanation shown on the dashboard (never the unvalidated draft)."""
+    row = conn.execute(
+        """SELECT method, headline, sentences, facts, causes, validation, model,
+                  updated_at FROM case_explanation WHERE case_id = %s""",
+        (case_id,),
+    ).fetchone()
+    return jsonable(row) if row else None
 
 
 def humanize(concept: str) -> str:
