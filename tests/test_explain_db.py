@@ -108,3 +108,56 @@ def test_api_serves_the_explanation(cases):
         heads = {x["id"]: x["explanation_headline"] for x in c.get("/api/cases").json()["items"]}
         assert heads[ulh] == e["headline"] and heads[t1]
         assert c.get("/api/cases/999999/explanation").status_code == 404
+
+
+def test_audit_reports_100_percent_after_the_pipeline(cases):
+    from radar.explain.service import audit
+
+    db, ulh, _ = cases
+    explain_case(db, ulh, llm=True, client=FakeClient(GOOD))
+    r = audit(db)
+    assert (r["cases"], r["explained"], r["coverage_pct"]) == (2, 2, 100.0)
+    assert r["by_method"] == {"llm": 1, "template": 1}
+    assert r["figures_displayed"] >= 3 and r["figures_validated_pct"] == 100.0
+    assert r["dates_displayed"] >= 2 and r["dates_validated_pct"] == 100.0
+    assert r["failing_cases"] == [] and r["tokens"]["input_tokens"] == 1200
+
+
+def test_audit_catches_a_stored_figure_that_drifted(cases):
+    from psycopg.types.json import Jsonb
+
+    from radar.explain.service import audit
+
+    db, ulh, _ = cases
+    sentences = row(db, ulh)["sentences"]
+    sentences[-2] = sentences[-2].replace("$534.9 million", "$543.9 million")
+    db.execute(
+        "UPDATE case_explanation SET sentences = %s WHERE case_id = %s", (Jsonb(sentences), ulh)
+    )
+    r = audit(db)
+    assert r["figures_validated_pct"] < 100.0
+    assert r["failing_cases"][0]["case_id"] == ulh
+    assert "'$543.9 million' matches no stored value" in r["failing_cases"][0]["problems"]
+
+
+def test_cli_backfill_with_workers_is_resumable(cases, monkeypatch, capsys):
+    import argparse
+
+    from radar import cli
+    from radar.explain import narrative
+
+    from .test_pipeline_db import TEST_DB
+
+    db, ulh, t1 = cases
+    monkeypatch.setenv("RADAR_DATABASE_URL", TEST_DB)
+    monkeypatch.setattr(narrative, "_client", lambda: FakeClient(GOOD))
+    args = argparse.Namespace(
+        case=None, status=None, limit=None, llm=True, force=False, missing=True, workers=2
+    )
+    assert cli.cmd_explain(args) == 0
+    out = capsys.readouterr().out
+    assert "cases 2/2" in out and "'llm': 1" in out  # ULH rewritten
+    assert row(db, ulh)["method"] == "llm"
+    # T1's rewrite has ULH's figures, so it fails validation and is not retried
+    assert row(db, t1)["llm_reason"] == "failed validation"
+    assert cli.cmd_explain(args) == 0 and "nothing to do" in capsys.readouterr().out

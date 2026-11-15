@@ -180,3 +180,93 @@ def explain_case(
             },
         )
     return {"case_id": case_id, "method": shown.method, "reason": reason, "usage": usage}
+
+
+# --- M4 exit check ----------------------------------------------------------------------
+
+
+def audit(conn: psycopg.Connection, limit: int | None = None) -> dict[str, Any]:
+    """Re-validate every stored explanation against the data as it is now.
+
+    The M4 exit criterion is that 100% of the figures (and dates) the dashboard displays
+    match the stored data. Explanations were validated when written; this re-checks them in
+    case the data changed since (e.g. a later amendment) and the case was not re-explained.
+    """
+    from decimal import Decimal
+
+    from radar.explain.template import Fact
+    from radar.explain.validate import dates, validate
+
+    total_cases = conn.execute("SELECT count(*) AS n FROM restatement_case").fetchone()["n"]
+    rows = conn.execute(
+        "SELECT * FROM case_explanation ORDER BY case_id LIMIT %s", (limit or 10**9,)
+    ).fetchall()
+    figures = figures_bad = dates_n = dates_bad = fact_bad = 0
+    methods: dict[str, int] = {}
+    reasons: dict[str, int] = {}
+    failing: list[dict[str, Any]] = []
+    tokens = {"input_tokens": 0, "output_tokens": 0}
+    for row in rows:
+        methods[row["method"]] = methods.get(row["method"], 0) + 1
+        reasons[row["llm_reason"] or "-"] = reasons.get(row["llm_reason"] or "-", 0) + 1
+        for k in tokens:
+            tokens[k] += (row["usage"] or {}).get(k, 0)
+        g = gather(conn, row["case_id"])
+        if g is None:
+            continue
+        c = g["case"]
+        known = {d for d in [c.warning_date, c.amendment_date, *c.period_ends] if d}
+        known |= {d for p in g["view"] for d in (p.start, p.end) if d}
+        known |= {iso for _s, iso in dates(g["words"]) if iso}
+        e = Explanation(
+            headline=row["headline"],
+            sentences=row["sentences"],
+            facts=[
+                Fact(
+                    f["shown"],
+                    Decimal(f["value"]),
+                    f["item"],
+                    f["period_start"],
+                    f["period_end"],
+                    f["field"],
+                )
+                for f in row["facts"]
+            ],
+            causes=[],
+            method=row["method"],
+            known_dates=known,
+            names={c.company},
+        )
+        v = validate(e, g["view"])
+        bad_fig = sum(p.kind == "unmatched_number" for p in v.problems)
+        bad_date = sum(p.kind == "unmatched_date" for p in v.problems)
+        bad_fact = sum(p.kind in ("fact_mismatch", "missing_cell") for p in v.problems)
+        figures += v.figures_checked
+        figures_bad += bad_fig
+        dates_n += v.dates_checked
+        dates_bad += bad_date
+        fact_bad += bad_fact
+        if v.problems and len(failing) < 25:
+            failing.append(
+                {"case_id": row["case_id"], "problems": [p.detail for p in v.problems][:5]}
+            )
+
+    def pct(bad: int, n: int) -> float:
+        return round(100.0 * (n - bad) / n, 2) if n else 100.0
+
+    cost = (tokens["input_tokens"] * 4 + tokens["output_tokens"] * 20) / 1e6
+    return {
+        "cases": total_cases,
+        "explained": len(rows),
+        "coverage_pct": round(100.0 * len(rows) / total_cases, 2) if total_cases else 0.0,
+        "by_method": methods,
+        "llm_reasons": reasons,
+        "figures_displayed": figures,
+        "figures_validated_pct": pct(figures_bad, figures),
+        "dates_displayed": dates_n,
+        "dates_validated_pct": pct(dates_bad, dates_n),
+        "facts_no_longer_matching_data": fact_bad,
+        "failing_cases": failing,
+        "tokens": tokens,
+        "approx_cost_usd": round(cost, 2),
+    }
