@@ -312,6 +312,8 @@ def cmd_explain(args: argparse.Namespace) -> int:
             try:
                 r = explain_case(conn, case_id, llm=use_llm, force=args.force) or {}
                 key = "skipped" if r.get("skipped") else r.get("method", "gone")
+                if use_llm and key == "template":  # say why Claude's text was not used
+                    key = f"template ({r.get('reason')})"
                 for k, v in (r.get("usage") or {}).items():
                     tokens[k] = tokens.get(k, 0) + v
             except Exception as exc:  # keep going
