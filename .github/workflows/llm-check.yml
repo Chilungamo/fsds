@@ -1,0 +1,35 @@
+# Runs the live Claude narrative tests (M4 step 4) on demand, using the repository's
+# ANTHROPIC_API_KEY secret. Start it from GitHub: Actions -> "LLM narrative check" -> Run workflow.
+# Each run makes 4 API calls (a few cents). It never runs on push or pull requests.
+name: LLM narrative check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  narrative:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,llm]"
+      - name: Offline tests (free)
+        run: python -m pytest -q tests/test_causes.py tests/test_template.py tests/test_validate.py tests/test_narrative.py
+      - name: Live Claude rewrite (4 calls)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::No ANTHROPIC_API_KEY repository secret found (Settings -> Secrets and variables -> Actions)."
+            exit 1
+          fi
+          python -m pytest -m llm tests/test_narrative.py -s -rA
