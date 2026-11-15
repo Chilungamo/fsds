@@ -125,8 +125,10 @@ def test_live_feed_8k_then_amendment(conn):
     assert ("2025-09-27", "interim") in periods(conn, case["id"], "xbrl")
     assert events(conn) == [
         ("case.created", "0001193125-26-098600"),
+        ("case.explained", None),  # M4: explanation of the warning
         ("case.confirmed", "0001193125-26-098732"),
         ("case.enriched", None),  # M2: deltas, checks and graph computed
+        ("case.explained", None),  # M4: rewritten with the restated figures
     ]
     meta = conn.execute(
         "SELECT meta FROM filing WHERE accession = '0001193125-26-098732'"
@@ -149,7 +151,13 @@ def test_backfill_order_amendment_before_8k(conn):
     assert case["status"] == "CONFIRMED" and case["sub_item"] == "a"
     assert set(links(conn, case["id"]).values()) == {"warning", "amendment"}
     assert len(periods(conn, case["id"], "item402")) == 6
-    assert [e for e, _ in events(conn)] == ["case.created", "case.enriched", "case.updated"]
+    assert [e for e, _ in events(conn) if e != "case.explained"] == [
+        "case.created",
+        "case.enriched",
+        "case.updated",
+    ]
+    # M4: explained after the amendment, and again once the 8-K added its own words
+    assert [e for e, _ in events(conn)].count("case.explained") == 2
 
 
 def test_cases_are_kept_apart_by_company_and_time(conn):

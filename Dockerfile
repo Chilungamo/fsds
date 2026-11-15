@@ -17,7 +17,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY radar ./radar
 COPY --from=web /web/dist ./radar/web/dist
-RUN pip install --no-cache-dir . && rm -rf /app/radar \
+RUN pip install --no-cache-dir ".[llm]" && rm -rf /app/radar \
     && useradd --create-home radar && mkdir -p /data/raw && chown -R radar /data
 USER radar
 WORKDIR /home/radar

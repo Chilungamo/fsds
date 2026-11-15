@@ -126,3 +126,35 @@ def test_text_without_figures_validates():
     e = explain(CaseFacts("Acme Corp", "2026-11-09", "b"), [], {}, [])
     v = validate(e, {})
     assert v.ok and v.figures_checked == 0
+
+
+def test_reading_dates():
+    from radar.explain.validate import dates
+
+    assert dates("On Sept. 27, 2025, 27 September 2025 and 2025-09-27; not 2025-02-30.") == [
+        ("Sept. 27, 2025", "2025-09-27"),
+        ("27 September 2025", "2025-09-27"),
+        ("2025-09-27", "2025-09-27"),
+        ("2025-02-30", ""),
+    ]
+
+
+def test_dates_must_come_from_the_filings():
+    e, view = real(0)
+    assert validate(e, view).dates_checked >= 3
+    wrong = replace(e, sentences=[*e.sentences, "The error was found on July 4, 2019."])
+    v = validate(wrong, view)
+    assert [p.kind for p in v.problems] == ["unmatched_date"]
+    cleaned, _ = enforce(wrong, view, "fallback")
+    assert "July 4, 2019" not in cleaned.text and validate(cleaned, view).ok
+
+
+def test_company_name_digits_are_not_figures():
+    e, view = real(0)
+    named = replace(
+        e,
+        names={"8X8 INC", "180 Life Sciences Corp."},
+        sentences=["8x8 and 180 Life Sciences are names, not amounts.", *e.sentences],
+    )
+    assert validate(named, view).ok
+    assert check_text("8x8 fell by $9 million.", e.facts, {"8X8 INC"})[1] == ["$9 million"]

@@ -46,6 +46,45 @@ _FIGURE = re.compile(
 )
 
 
+_MONTH_NUM = {
+    m: i
+    for i, names in enumerate(
+        [("january", "jan"), ("february", "feb"), ("march", "mar"), ("april", "apr"),
+         ("may",), ("june", "jun"), ("july", "jul"), ("august", "aug"),
+         ("september", "sep", "sept"), ("october", "oct"), ("november", "nov"),
+         ("december", "dec")],
+        start=1,
+    )
+    for m in names
+}  # fmt: skip
+_DATE = re.compile(
+    rf"\b(?P<m1>{MONTHS})\.?\s+(?P<d1>\d{{1,2}})(?:st|nd|rd|th)?,?\s+(?P<y1>\d{{4}})"
+    rf"|\b(?P<d2>\d{{1,2}})\s+(?P<m2>{MONTHS})\s+(?P<y2>\d{{4}})"
+    r"|\b(?P<iso>\d{4}-\d{2}-\d{2})\b",
+    re.I,
+)
+
+
+def dates(text: str) -> list[tuple[str, str]]:
+    """(as written, ISO) for every full date in ``text``; unparseable ones map to ''."""
+    from datetime import date
+
+    out = []
+    for m in _DATE.finditer(text):
+        try:
+            if m.group("iso"):
+                iso = date.fromisoformat(m.group("iso")).isoformat()
+            else:
+                month = m.group("m1") or m.group("m2")
+                day = m.group("d1") or m.group("d2")
+                year = m.group("y1") or m.group("y2")
+                iso = date(int(year), _MONTH_NUM[month.lower()], int(day)).isoformat()
+        except ValueError:
+            iso = ""
+        out.append((m.group().strip(), iso))
+    return out
+
+
 @dataclass(frozen=True)
 class Figure:
     """A number as written: its value and how precisely it was written."""
@@ -58,7 +97,7 @@ class Figure:
 
 @dataclass
 class Problem:
-    kind: str  # fact_mismatch | missing_cell | unmatched_number
+    kind: str  # fact_mismatch | missing_cell | unmatched_number | unmatched_date
     detail: str
     sentence: int | None = None  # index into Explanation.sentences; None for the headline
 
@@ -67,6 +106,7 @@ class Problem:
 class Validation:
     figures_checked: int = 0
     facts_checked: int = 0
+    dates_checked: int = 0
     problems: list[Problem] = field(default_factory=list)
 
     @property
@@ -77,10 +117,23 @@ class Validation:
 # --- reading numbers out of text ------------------------------------------------------------
 
 
-def figures(text: str) -> list[Figure]:
+def _name_pattern(names: set[str] | frozenset[str]) -> re.Pattern | None:
+    """Words of company names that contain digits ("8x8", "180", "II" is fine already):
+    the company's name is not a figure, written in full or shortened."""
+    words = {w.strip(".,()&") for n in names for w in n.split() if any(ch.isdigit() for ch in w)}
+    words.discard("")
+    if not words:
+        return None
+    return re.compile(r"(?<![\w$])(?:" + "|".join(map(re.escape, words)) + r")(?![\w%])", re.I)
+
+
+def figures(text: str, names: set[str] | frozenset[str] = frozenset()) -> list[Figure]:
     """Financial figures in ``text``. Bare whole numbers under 1,000 without a currency sign,
-    scale or percent are counts ("6 periods", "two-class") and are skipped."""
+    scale or percent are counts ("6 periods", "two-class") and are skipped, as are dates and
+    the company's own name."""
     masked = _NOT_FIGURES.sub(lambda m: " " * len(m.group()), text)
+    if rx := _name_pattern(names):
+        masked = rx.sub(lambda m: " " * len(m.group()), masked)
     out = []
     for m in _FIGURE.finditer(masked):
         num = m.group("num").replace(",", "")
@@ -141,9 +194,11 @@ def matches(fig: Figure, fact: Fact) -> bool:
     return abs(abs(fact.value) - fig.value) <= fig.tolerance + Decimal("1e-9")
 
 
-def check_text(text: str, facts: list[Fact]) -> tuple[int, list[str]]:
+def check_text(
+    text: str, facts: list[Fact], names: set[str] | frozenset[str] = frozenset()
+) -> tuple[int, list[str]]:
     """(figures read, figures that match no fact)."""
-    found = figures(text)
+    found = figures(text, names)
     return len(found), [f.text for f in found if not any(matches(f, x) for x in facts)]
 
 
@@ -151,10 +206,17 @@ def validate(e: Explanation, view: View) -> Validation:
     good, problems = check_facts(e.facts, view)
     v = Validation(facts_checked=len(e.facts), problems=problems)
     for i, text in [(None, e.headline), *enumerate(e.sentences)]:
-        n, bad = check_text(text, good)
+        n, bad = check_text(text, good, e.names)
         v.figures_checked += n
         v.problems += [
             Problem("unmatched_number", f"{b!r} matches no stored value", i) for b in bad
+        ]
+        found = dates(text)
+        v.dates_checked += len(found)
+        v.problems += [
+            Problem("unmatched_date", f"{shown!r} is not a date in the filings", i)
+            for shown, iso in found
+            if iso not in e.known_dates
         ]
     return v
 
@@ -167,10 +229,12 @@ def enforce(e: Explanation, view: View, fallback_headline: str) -> tuple[Explana
         return e, v
     bad_sentences = {p.sentence for p in v.problems if p.sentence is not None}
     good, _ = check_facts(e.facts, view)
-    headline_bad = any(p.sentence is None for p in v.problems if p.kind == "unmatched_number")
+    headline_bad = any(
+        p.sentence is None for p in v.problems if p.kind in ("unmatched_number", "unmatched_date")
+    )
     kept = [s for i, s in enumerate(e.sentences) if i not in bad_sentences]
     shown = " ".join([e.headline if not headline_bad else fallback_headline, *kept])
-    used = [f for f in good if any(matches(fig, f) for fig in figures(shown))]
+    used = [f for f in good if any(matches(fig, f) for fig in figures(shown, e.names))]
     cleaned = replace(
         e,
         headline=fallback_headline if headline_bad else e.headline,

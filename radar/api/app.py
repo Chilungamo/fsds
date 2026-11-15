@@ -121,6 +121,14 @@ def create_app(database_url: str | None = None, web_dist: Path | None = WEB_DIST
             raise HTTPException(404, "case not found")
         return c
 
+    @app.get("/api/cases/{case_id}/explanation")
+    def explanation(case_id: int):
+        with db() as conn:
+            e = queries.get_explanation(conn, case_id)
+        if e is None:
+            raise HTTPException(404, "no explanation for this case yet")
+        return e
+
     @app.get("/api/cases/{case_id}/deltas")
     def deltas(case_id: int, all: bool = False):
         with db() as conn:

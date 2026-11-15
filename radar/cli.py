@@ -280,6 +280,49 @@ def cmd_enrich(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_explain(args: argparse.Namespace) -> int:
+    """Write plain-English explanations (template, plus Claude's rewrite with --llm)."""
+    from radar.explain.service import explain_case, llm_enabled
+
+    use_llm = args.llm or llm_enabled()
+    with _db() as conn:
+        ids = [
+            r["id"]
+            for r in conn.execute(
+                """SELECT rc.id FROM restatement_case rc
+                   LEFT JOIN case_explanation e ON e.case_id = rc.id
+                   WHERE (%s::bigint IS NULL OR rc.id = %s)
+                     AND (%s::text IS NULL OR rc.status::text = %s)
+                     AND (NOT %s OR e.case_id IS NULL OR (%s AND e.method = 'template'))
+                   ORDER BY rc.updated_at DESC LIMIT %s""",
+                (
+                    args.case,
+                    args.case,
+                    args.status,
+                    args.status,
+                    args.missing,
+                    use_llm,
+                    args.limit or 10**9,
+                ),
+            )
+        ]
+        counts: dict[str, int] = {}
+        tokens = {"input_tokens": 0, "output_tokens": 0}
+        for i, case_id in enumerate(ids, 1):
+            try:
+                r = explain_case(conn, case_id, llm=use_llm, force=args.force) or {}
+                key = "skipped" if r.get("skipped") else r.get("method", "gone")
+                for k, v in (r.get("usage") or {}).items():
+                    tokens[k] = tokens.get(k, 0) + v
+            except Exception as exc:  # keep going
+                logging.getLogger("radar.explain").exception("case %s", case_id)
+                key = f"error: {type(exc).__name__}"
+            counts[key] = counts.get(key, 0) + 1
+            if i % 25 == 0 or i == len(ids):
+                print(f"cases {i}/{len(ids)} {counts} tokens {tokens}", flush=True)
+    return 0
+
+
 def _money(v) -> str:
     if v is None:
         return ""
@@ -452,6 +495,18 @@ def main(argv: list[str] | None = None) -> int:
     en.add_argument("--shard", type=int, default=0, help="this worker's shard (0-based)")
     en.add_argument("--shards", type=int, default=1, help="number of parallel workers")
     en.set_defaults(func=cmd_enrich)
+    ex = sub.add_parser("explain", help="write plain-English explanations for cases")
+    ex.add_argument("--case", type=int)
+    ex.add_argument("--status", choices=["PENDING", "CONFIRMED", "NEEDS_REVIEW"])
+    ex.add_argument("--limit", type=int)
+    ex.add_argument("--llm", action="store_true", help="have Claude rewrite (needs API key)")
+    ex.add_argument("--force", action="store_true", help="rewrite even if inputs are unchanged")
+    ex.add_argument(
+        "--missing",
+        action="store_true",
+        help="only cases without one (or, with --llm, without a Claude one)",
+    )
+    ex.set_defaults(func=cmd_explain)
     dl = sub.add_parser("deltas", help="show a case's restated line items and checks")
     dl.add_argument("case", type=int)
     dl.add_argument("--all", action="store_true", help="include unchanged and unmapped rows")
