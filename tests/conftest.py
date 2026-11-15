@@ -6,13 +6,16 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip tests marked ``live`` unless explicitly selected with ``-m live``."""
-    if "live" in (config.getoption("-m") or ""):
-        return
-    skip = pytest.mark.skip(reason="hits SEC EDGAR; run with -m live")
-    for item in items:
-        if "live" in item.keywords:
-            item.add_marker(skip)
+    """Skip tests marked ``live`` (SEC EDGAR) or ``llm`` (Anthropic API, costs money) unless
+    explicitly selected with ``-m live`` / ``-m llm``."""
+    selected = config.getoption("-m") or ""
+    reasons = {"live": "hits SEC EDGAR; run with -m live", "llm": "calls Claude; run with -m llm"}
+    for marker, reason in reasons.items():
+        if marker in selected:
+            continue
+        for item in items:
+            if marker in item.keywords:
+                item.add_marker(pytest.mark.skip(reason=reason))
 
 
 @pytest.fixture(autouse=True)
