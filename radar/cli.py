@@ -281,7 +281,14 @@ def cmd_enrich(args: argparse.Namespace) -> int:
 
 
 def cmd_explain(args: argparse.Namespace) -> int:
-    """Write plain-English explanations (template, plus Claude's rewrite with --llm)."""
+    """Write plain-English explanations (template, plus Claude's rewrite with --llm).
+
+    Safe to stop and re-run: with --missing, cases that already have their final text are
+    skipped (a Claude rewrite, or one that failed validation and is not retried)."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from radar.db import repo
     from radar.explain.service import explain_case, llm_enabled
 
     use_llm = args.llm or llm_enabled()
@@ -293,7 +300,9 @@ def cmd_explain(args: argparse.Namespace) -> int:
                    LEFT JOIN case_explanation e ON e.case_id = rc.id
                    WHERE (%s::bigint IS NULL OR rc.id = %s)
                      AND (%s::text IS NULL OR rc.status::text = %s)
-                     AND (NOT %s OR e.case_id IS NULL OR (%s AND e.method = 'template'))
+                     AND (NOT %s OR e.case_id IS NULL
+                          OR (%s AND e.method = 'template'
+                              AND e.llm_reason IS DISTINCT FROM 'failed validation'))
                    ORDER BY rc.updated_at DESC LIMIT %s""",
                 (
                     args.case,
@@ -306,21 +315,50 @@ def cmd_explain(args: argparse.Namespace) -> int:
                 ),
             )
         ]
-        counts: dict[str, int] = {}
-        tokens = {"input_tokens": 0, "output_tokens": 0}
-        for i, case_id in enumerate(ids, 1):
-            try:
-                r = explain_case(conn, case_id, llm=use_llm, force=args.force) or {}
-                key = "skipped" if r.get("skipped") else r.get("method", "gone")
-                for k, v in (r.get("usage") or {}).items():
-                    tokens[k] = tokens.get(k, 0) + v
-            except Exception as exc:  # keep going
-                logging.getLogger("radar.explain").exception("case %s", case_id)
-                key = f"error: {type(exc).__name__}"
+    counts: dict[str, int] = {}
+    tokens = {"input_tokens": 0, "output_tokens": 0}
+    lock, local = threading.Lock(), threading.local()
+    done = 0
+
+    def one(case_id: int) -> None:
+        nonlocal done
+        if not hasattr(local, "conn"):  # one database connection per worker thread
+            local.conn = repo.connect()
+        try:
+            r = explain_case(local.conn, case_id, llm=use_llm, force=args.force) or {}
+            key = "skipped" if r.get("skipped") else r.get("method", "gone")
+            if use_llm and key == "template":  # say why Claude's text was not used
+                key = f"template ({r.get('reason')})"
+        except Exception as exc:  # keep going; the case keeps its previous text
+            logging.getLogger("radar.explain").exception("case %s", case_id)
+            key, r = f"error: {type(exc).__name__}", {}
+        with lock:
             counts[key] = counts.get(key, 0) + 1
-            if i % 25 == 0 or i == len(ids):
-                print(f"cases {i}/{len(ids)} {counts} tokens {tokens}", flush=True)
+            for k, v in (r.get("usage") or {}).items():
+                tokens[k] = tokens.get(k, 0) + v
+            done += 1
+            if done % 25 == 0 or done == len(ids):
+                cost = (tokens["input_tokens"] * 4 + tokens["output_tokens"] * 20) / 1e6
+                print(
+                    f"cases {done}/{len(ids)} {counts} tokens {tokens} ≈ ${cost:.2f}",
+                    flush=True,
+                )
+
+    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+        list(pool.map(one, ids))
+    if not ids:
+        print("nothing to do")
     return 0
+
+
+def cmd_explain_report(args: argparse.Namespace) -> int:
+    """M4 exit check: re-validate every stored explanation against the current data."""
+    from radar.explain.service import audit
+
+    with _db() as conn:
+        r = audit(conn, limit=args.limit)
+    print(json.dumps(r, indent=2, default=str))
+    return 0 if r["figures_validated_pct"] == 100.0 and r["dates_validated_pct"] == 100.0 else 1
 
 
 def _money(v) -> str:
@@ -506,7 +544,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="only cases without one (or, with --llm, without a Claude one)",
     )
+    ex.add_argument("--workers", type=int, default=1, help="cases explained in parallel")
     ex.set_defaults(func=cmd_explain)
+    er = sub.add_parser("explain-report", help="M4 exit check: re-validate stored explanations")
+    er.add_argument("--limit", type=int)
+    er.set_defaults(func=cmd_explain_report)
     dl = sub.add_parser("deltas", help="show a case's restated line items and checks")
     dl.add_argument("case", type=int)
     dl.add_argument("--all", action="store_true", help="include unchanged and unmapped rows")
