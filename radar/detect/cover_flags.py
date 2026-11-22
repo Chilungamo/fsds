@@ -71,14 +71,16 @@ def parse_cover_report(page: str, source: str = "R1.htm") -> CoverFlags | None:
     return CoverFlags(values["error_correction"], values["recovery_analysis"], source)
 
 
-def cover_report_name(filing_summary: str) -> str | None:
-    """The cover report's file name from FilingSummary.xml (MenuCategory "Cover")."""
+def cover_report_names(filing_summary: str) -> list[str]:
+    """File names of the reports in the "Cover" menu category of FilingSummary.xml, in order.
+    Some filers put an "Audit Information" report first, so there can be several."""
+    names = []
     for report in re.findall(r"<Report\b.*?</Report>", filing_summary, re.S):
         if re.search(r"<MenuCategory>\s*Cover\s*</MenuCategory>", report, re.I):
             m = re.search(r"<HtmlFileName>\s*([^<\s]+)\s*</HtmlFileName>", report)
             if m:
-                return m.group(1)
-    return None
+                names.append(m.group(1))
+    return names
 
 
 def fetch_cover_flags(edgar: EdgarClient, cik: int, accession: str) -> CoverFlags:
@@ -87,8 +89,9 @@ def fetch_cover_flags(edgar: EdgarClient, cik: int, accession: str) -> CoverFlag
     if page is not None and (flags := parse_cover_report(page.text)):
         return flags
     summary = edgar.get_optional(filing_document_url(cik, accession, "FilingSummary.xml"))
-    name = cover_report_name(summary.text) if summary is not None else None
-    if name and name != "R1.htm":
+    for name in cover_report_names(summary.text) if summary is not None else []:
+        if name == "R1.htm":
+            continue
         page = edgar.get_optional(filing_document_url(cik, accession, name))
         if page is not None and (flags := parse_cover_report(page.text, name)):
             return flags

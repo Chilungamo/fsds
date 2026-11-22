@@ -5,7 +5,7 @@ import pytest
 
 from radar.detect.cover_flags import (
     CoverFlags,
-    cover_report_name,
+    cover_report_names,
     fetch_cover_flags,
     parse_cover_report,
 )
@@ -42,15 +42,17 @@ def test_page_that_is_not_the_cover():
 
 
 SUMMARY = """<FilingSummary><MyReports>
-<Report instance="x.htm"><HtmlFileName>R1.htm</HtmlFileName><MenuCategory>Statements</MenuCategory></Report>
+<Report instance="x.htm"><HtmlFileName>R1.htm</HtmlFileName><MenuCategory>Cover</MenuCategory></Report>
+<Report instance="x.htm"><HtmlFileName>R2.htm</HtmlFileName><MenuCategory>Statements</MenuCategory></Report>
 <Report instance="x.htm"><HtmlFileName>R7.htm</HtmlFileName><MenuCategory>Cover</MenuCategory></Report>
 </MyReports></FilingSummary>"""
 
 
 def test_cover_report_found_via_filing_summary():
-    assert cover_report_name(SUMMARY) == "R7.htm"
+    # like ONE Gas: R1 is "Audit Information" (also filed under Cover), the cover is later
+    assert cover_report_names(SUMMARY) == ["R1.htm", "R7.htm"]
     pages = {
-        "R1.htm": "<html><td>Consolidated Balance Sheets</td></html>",
+        "R1.htm": "<html><td>Audit Information</td><td>Auditor Name</td></html>",
         "FilingSummary.xml": SUMMARY,
         "R7.htm": r1(CABLE_ONE),
     }
