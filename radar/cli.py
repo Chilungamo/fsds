@@ -166,11 +166,40 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cover_scan(args: argparse.Namespace) -> int:
+    """M5: read the error-correction check boxes on every 10-K filed in a date range."""
+    from radar.edgar.feeds import iter_days
+    from radar.workers.cover_scan import scan_day
+
+    end = _day(args.end) if args.end else date.today() - timedelta(days=1)
+    start = _day(args.start) if args.start else end - timedelta(days=args.days - 1)
+    total = flagged = 0
+    with _db() as conn, EdgarClient() as edgar:
+        for day in iter_days(start, end):
+            r = scan_day(conn, edgar, day)
+            if not r.available:
+                continue
+            total += r.scanned
+            flagged += len(r.flagged)
+            print(
+                f"{r.day}: {r.listed} annual reports, {r.scanned} scanned, "
+                f"{len(r.flagged)} with an error correction"
+                + (f", {r.missing} without a cover report" if r.missing else ""),
+                flush=True,
+            )
+    print(f"scanned {total}, error correction ticked on {flagged}")
+    return 0
+
+
 def cmd_nightly(args: argparse.Namespace) -> int:
     """Scheduled job in one command (hosts like Render run a command, not a shell line):
     reconcile the last few days against EDGAR's daily index, then drain the queue."""
     args.start, args.end = None, None
     rc = cmd_reconcile(args)
+    try:  # M5: cover check boxes of the same days; never blocks processing the queue
+        cmd_cover_scan(args)
+    except Exception:
+        logging.getLogger("radar.cover_scan").exception("cover scan failed")
     args.limit = None
     return rc or cmd_process(args)
 
@@ -520,6 +549,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         if name == "recall":
             c.add_argument("--target", type=float, default=0.99)
+    cv = sub.add_parser("cover-scan", help="read 10-K cover error-correction check boxes")
+    cv.add_argument("start", nargs="?", help="YYYY-MM-DD")
+    cv.add_argument("end", nargs="?", help="YYYY-MM-DD (default: yesterday)")
+    cv.add_argument("--days", type=int, default=3, help="without START: this many days up to END")
+    cv.set_defaults(func=cmd_cover_scan)
     cs = sub.add_parser("cases", help="list restatement cases")
     cs.add_argument("--status")
     cs.add_argument("--limit", type=int, default=30)
